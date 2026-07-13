@@ -1,5 +1,5 @@
-import { FormEvent, useEffect, useState } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 
 import { api, AccessStatus, clearStoredAccessToken, setStoredAccessToken } from "./api/client";
 import { EnvironmentStatusPanel } from "./components/EnvironmentStatusPanel";
@@ -13,10 +13,13 @@ import { SettingsPage } from "./pages/Settings";
 import { VideoReviewPage } from "./pages/VideoReview";
 import { PerformancePage } from "./pages/Performance";
 import { CampaignsPage } from "./pages/Campaigns";
+import { PublicExperimentPage } from "./pages/PublicExperiment";
+import { ExperimentThankYouPage } from "./pages/ExperimentThankYou";
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "story-engine-sidebar-collapsed";
 
 export default function App() {
+  const location = useLocation();
   const [accessStatus, setAccessStatus] = useState<AccessStatus | null>(null);
   const [password, setPassword] = useState("");
   const [isCheckingAccess, setIsCheckingAccess] = useState(true);
@@ -28,6 +31,10 @@ export default function App() {
     }
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
   });
+  const isPublicExperimentRoute = useMemo(
+    () => location.pathname === "/experiment" || location.pathname === "/experiment/thank-you" || location.pathname === "/experiment/cancelled",
+    [location.pathname],
+  );
 
   async function refreshAccessStatus() {
     try {
@@ -83,6 +90,16 @@ export default function App() {
     clearStoredAccessToken();
     setAccessStatus((current) => current ? { ...current, authenticated: false } : current);
     setAccessError("");
+  }
+
+  if (isPublicExperimentRoute) {
+    return (
+      <Routes>
+        <Route path="/experiment" element={<PublicExperimentPage />} />
+        <Route path="/experiment/cancelled" element={<PublicExperimentPage />} />
+        <Route path="/experiment/thank-you" element={<ExperimentThankYouPage />} />
+      </Routes>
+    );
   }
 
   if (isCheckingAccess) {
@@ -221,6 +238,9 @@ export default function App() {
       <main className="content">
         <Routes>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/experiment" element={<PublicExperimentPage />} />
+          <Route path="/experiment/cancelled" element={<PublicExperimentPage />} />
+          <Route path="/experiment/thank-you" element={<ExperimentThankYouPage />} />
           <Route path="/queue" element={<IdeaQueuePage />} />
           <Route path="/assets" element={<AssetLibraryPage />} />
           <Route path="/app/batch-planner" element={<BatchPlannerPage />} />

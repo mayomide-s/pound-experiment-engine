@@ -124,7 +124,7 @@ def test_variant_campaign_ownership(client):
 def test_campaign_schema_metadata_includes_new_tables():
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
-    assert {"campaigns", "creative_variants"} <= tables
+    assert {"campaigns", "creative_variants", "checkout_session_records"} <= tables
     pipeline_run_columns = {column["name"] for column in inspector.get_columns("pipeline_runs")}
     assert {"campaign_id", "creative_variant_id"} <= pipeline_run_columns
 

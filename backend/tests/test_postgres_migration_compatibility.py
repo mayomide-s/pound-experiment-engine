@@ -18,7 +18,7 @@ from app.models.entities import PerformanceLearning
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-EXPECTED_HEAD = "0021_campaign_foundation"
+EXPECTED_HEAD = "0022_checkout_sessions"
 TEST_POSTGRES_DATABASE_URL = os.environ.get("TEST_POSTGRES_DATABASE_URL")
 
 
@@ -96,6 +96,78 @@ def _create_run(engine, topic: str) -> str:
         session.add(run)
         session.commit()
         return run.id
+
+
+def _create_run_for_revision_0017(engine, topic: str) -> str:
+    """Historical migration tests must insert only columns that existed at that revision."""
+    account_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+    now = datetime.now(UTC).replace(tzinfo=None)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO accounts (id, name, niche, account_config_json, created_at, updated_at)
+                VALUES (:id, :name, :niche, :account_config_json, :created_at, :updated_at)
+                """
+            ),
+            {
+                "id": account_id,
+                "name": f"acct-{uuid.uuid4().hex[:8]}",
+                "niche": "coding",
+                "account_config_json": "{}",
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO pipeline_runs (
+                    id,
+                    account_id,
+                    topic,
+                    auto_mode,
+                    style_preset,
+                    input_config_json,
+                    priority,
+                    current_stage,
+                    status,
+                    attempt_count,
+                    created_at,
+                    updated_at
+                ) VALUES (
+                    :id,
+                    :account_id,
+                    :topic,
+                    :auto_mode,
+                    :style_preset,
+                    :input_config_json,
+                    :priority,
+                    :current_stage,
+                    :status,
+                    :attempt_count,
+                    :created_at,
+                    :updated_at
+                )
+                """
+            ),
+            {
+                "id": run_id,
+                "account_id": account_id,
+                "topic": topic,
+                "auto_mode": False,
+                "style_preset": "clean_3d_cartoon",
+                "input_config_json": "{}",
+                "priority": "NORMAL",
+                "current_stage": "COMPLETED",
+                "status": "COMPLETED",
+                "attempt_count": 0,
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+    return run_id
 
 
 def _insert_learning_without_is_archived(engine, run_id: str, observation: str) -> PerformanceLearning:
@@ -194,7 +266,7 @@ def test_postgres_fresh_database_upgrades_from_base_to_head_and_is_idempotent():
         manual_package_columns = {column["name"] for column in inspector.get_columns("manual_post_packages")}
         assert {"winner_platform_post_id", "winner_selected_at", "winner_selection_revision"} <= manual_package_columns
         assert "performance_learnings" in inspector.get_table_names()
-        assert {"campaigns", "creative_variants"} <= set(inspector.get_table_names())
+        assert {"campaigns", "creative_variants", "checkout_session_records"} <= set(inspector.get_table_names())
         pipeline_run_columns = {column["name"] for column in inspector.get_columns("pipeline_runs")}
         assert {"campaign_id", "creative_variant_id"} <= pipeline_run_columns
 
@@ -232,7 +304,7 @@ def test_postgres_migration_upgrade_from_0015_and_repeated_head_is_idempotent():
         manual_package_columns = {column["name"] for column in inspector.get_columns("manual_post_packages")}
         assert {"winner_platform_post_id", "winner_selected_at", "winner_selection_revision"} <= manual_package_columns
         assert "performance_learnings" in inspector.get_table_names()
-        assert {"campaigns", "creative_variants"} <= set(inspector.get_table_names())
+        assert {"campaigns", "creative_variants", "checkout_session_records"} <= set(inspector.get_table_names())
         pipeline_run_columns = {column["name"] for column in inspector.get_columns("pipeline_runs")}
         assert {"campaign_id", "creative_variant_id"} <= pipeline_run_columns
 
@@ -260,7 +332,7 @@ def test_postgres_existing_0017_upgrades_to_0018_without_rewriting_learning_data
                 "ALTER TABLE performance_learnings ALTER COLUMN is_archived DROP DEFAULT"
             )
 
-        run_id = _create_run(engine, "Postgres scenario B")
+        run_id = _create_run_for_revision_0017(engine, "Postgres scenario B")
         learning = _create_learning_with_explicit_is_archived(engine, run_id, "Existing learning survives.", False)
         before = {
             "id": learning.id,
@@ -294,7 +366,7 @@ def test_postgres_direct_create_all_uses_portable_false_default():
 
         inspector = inspect(engine)
         assert "performance_learnings" in inspector.get_table_names()
-        assert {"campaigns", "creative_variants"} <= set(inspector.get_table_names())
+        assert {"campaigns", "creative_variants", "checkout_session_records"} <= set(inspector.get_table_names())
         pipeline_run_columns = {column["name"] for column in inspector.get_columns("pipeline_runs")}
         assert {"campaign_id", "creative_variant_id"} <= pipeline_run_columns
 

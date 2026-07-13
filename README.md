@@ -345,6 +345,46 @@ npm test -- --run
 npm run build
 ```
 
+## Stripe Test Checkout
+
+The public conversion funnel lives at `/experiment` and is disabled by default. Keep `STRIPE_ENABLED=false` for normal local Story Engine work. Stripe configuration is only required when you intentionally enable test Checkout.
+
+Required backend environment variables:
+
+- `STRIPE_ENABLED=true`
+- `STRIPE_SECRET_KEY=sk_test_...`
+- `STRIPE_WEBHOOK_SECRET=whsec_...`
+- `PUBLIC_SITE_BASE_URL=http://localhost:5173`
+- `PUBLIC_EXPERIMENT_CAMPAIGN_SLUG=the-one-pound-experiment`
+
+Local Stripe test flow:
+
+1. Seed or create the public campaign with slug `the-one-pound-experiment`.
+2. Start the backend and frontend locally.
+3. If you have Stripe CLI installed, forward webhook events to the backend:
+
+```bash
+stripe listen --forward-to http://localhost:8000/api/webhooks/stripe
+```
+
+4. Copy the printed signing secret from Stripe CLI into `STRIPE_WEBHOOK_SECRET`.
+5. Open `http://localhost:5173/experiment`.
+6. Click `Send £1`, complete hosted Checkout, and use this test card in test mode only:
+
+```text
+4242 4242 4242 4242
+Any future expiry date
+Any three-digit CVC
+Any valid postal code
+```
+
+Important notes:
+
+- The browser redirect to `/experiment/thank-you` is not treated as payment confirmation.
+- Payment completion is only confirmed after the signed `checkout.session.completed` webhook is verified and stored.
+- The public status endpoint exposes only safe session status fields, never card data, Stripe secrets, or raw webhook payloads.
+- Production readiness is still outstanding for areas like live-mode activation, tax handling, emails, analytics, fraud controls, and operational monitoring.
+
 ## Development Checks
 
 Backend:

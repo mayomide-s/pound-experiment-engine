@@ -28,6 +28,7 @@ export type PipelineRunCreatePayload = {
 };
 
 export type CampaignStatus = "draft" | "active" | "paused" | "completed";
+export type PublicCheckoutStatus = "created" | "open" | "completed" | "expired" | "failed";
 
 export type Campaign = {
   id: string;
@@ -68,6 +69,24 @@ export type CampaignUpdatePayload = Partial<CampaignCreatePayload>;
 
 export type CampaignListResponse = {
   items: Campaign[];
+};
+
+export type PublicCheckoutSessionCreatePayload = {
+  source_code?: string | null;
+};
+
+export type PublicCheckoutSessionResponse = {
+  checkout_session_id: string;
+  checkout_url: string;
+};
+
+export type PublicCheckoutStatusResponse = {
+  status: PublicCheckoutStatus;
+  payment_status?: string | null;
+  amount_total_minor: number;
+  currency: string;
+  campaign_name: string;
+  completed_at?: string | null;
 };
 
 export type CreativeVariant = {
@@ -718,6 +737,13 @@ export const api = {
     }),
   listCreativeVariants: (campaignId: string) =>
     request<CreativeVariant[]>(`/campaigns/${campaignId}/variants`),
+  createPublicCheckoutSession: (payload: PublicCheckoutSessionCreatePayload) =>
+    request<PublicCheckoutSessionResponse>("/public/checkout-sessions", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  getPublicCheckoutStatus: (checkoutSessionId: string) =>
+    request<PublicCheckoutStatusResponse>(`/public/checkout-sessions/${checkoutSessionId}`),
   getRun: (runId: string) => request<PipelineRunDetail>(`/pipeline-runs/${runId}`),
   resumeRun: (runId: string, reviewNotes = "", confirmPaidGeneration = false) =>
     request<PipelineRunDetail>(`/pipeline-runs/${runId}/resume`, {

@@ -66,6 +66,14 @@ class CampaignStatus(str, enum.Enum):
     COMPLETED = "completed"
 
 
+class CheckoutSessionRecordStatus(str, enum.Enum):
+    CREATED = "created"
+    OPEN = "open"
+    COMPLETED = "completed"
+    EXPIRED = "expired"
+    FAILED = "failed"
+
+
 class VideoStatus(str, enum.Enum):
     QUEUED = "queued"
     SUBMITTING = "submitting"
@@ -246,6 +254,7 @@ class Campaign(Base):
 
     creative_variants: Mapped[list["CreativeVariant"]] = relationship("CreativeVariant", back_populates="campaign")
     pipeline_runs: Mapped[list[PipelineRun]] = relationship("PipelineRun", back_populates="campaign")
+    checkout_sessions: Mapped[list["CheckoutSessionRecord"]] = relationship("CheckoutSessionRecord", back_populates="campaign")
 
 
 class CreativeVariant(Base):
@@ -273,6 +282,29 @@ class CreativeVariant(Base):
         back_populates="creative_variant",
         uselist=False,
     )
+
+
+class CheckoutSessionRecord(Base):
+    __tablename__ = "checkout_session_records"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    campaign_id: Mapped[str | None] = mapped_column(ForeignKey("campaigns.id"))
+    stripe_checkout_session_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[CheckoutSessionRecordStatus] = mapped_column(Enum(CheckoutSessionRecordStatus), nullable=False, default=CheckoutSessionRecordStatus.CREATED)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False)
+    amount_total_minor: Mapped[int] = mapped_column(Integer, nullable=False)
+    payment_status: Mapped[str | None] = mapped_column(String(64))
+    customer_email: Mapped[str | None] = mapped_column(String(255))
+    source_code: Mapped[str | None] = mapped_column(String(120))
+    stripe_event_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    campaign: Mapped["Campaign | None"] = relationship("Campaign", back_populates="checkout_sessions")
 
 
 class PipelineEvent(Base):

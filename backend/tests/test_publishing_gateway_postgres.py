@@ -35,7 +35,8 @@ from app.services.social_token_crypto import decrypt_secret
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-EXPECTED_HEAD = "0020_youtube_publication_execution"
+EXPECTED_HEAD = "0022_checkout_sessions"
+PUBLICATION_GATEWAY_HEAD = "0020_youtube_publication_execution"
 TEST_POSTGRES_DATABASE_URL = os.environ.get("TEST_POSTGRES_DATABASE_URL")
 
 
@@ -241,7 +242,7 @@ def test_postgres_publication_gateway_migration_upgrade_downgrade_reupgrade():
         _run_alembic(database_url, "upgrade", "0020_youtube_publication_execution")
         with engine.connect() as connection:
             revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert revision == EXPECTED_HEAD
+        assert revision == PUBLICATION_GATEWAY_HEAD
         engine.dispose()
 
 
@@ -305,6 +306,7 @@ def test_sqlite_publication_gateway_downgrade_reupgrade_from_current_schema():
     temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
     temp_db.close()
     database_url = f"sqlite:///{temp_db.name.replace(os.sep, '/')}"
+    engine = None
     try:
         engine = create_engine(database_url, future=True)
         Base.metadata.create_all(bind=engine)
@@ -322,14 +324,15 @@ def test_sqlite_publication_gateway_downgrade_reupgrade_from_current_schema():
         _run_alembic(database_url, "upgrade", "0020_youtube_publication_execution")
         with engine.connect() as connection:
             revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert revision == EXPECTED_HEAD
+        assert revision == PUBLICATION_GATEWAY_HEAD
 
         inspector = inspect(engine)
         target_columns = {column["name"] for column in inspector.get_columns("publication_targets")}
         assert "platform_post_id" in target_columns
         assert "actual_visibility" in target_columns
-        engine.dispose()
     finally:
+        if engine is not None:
+            engine.dispose()
         if os.path.exists(temp_db.name):
             os.unlink(temp_db.name)
 
@@ -340,7 +343,8 @@ def test_postgres_publication_gateway_service_integration(monkeypatch):
 
     admin_url = _get_admin_url()
     with _temporary_database(admin_url, "story_engine_pgpubsvc") as (_database_name, database_url):
-        _run_alembic(database_url, "upgrade", "0020_youtube_publication_execution")
+        # This is a runtime integration test, so it should use the current ORM against the current schema.
+        _run_alembic(database_url, "upgrade", "head")
         engine = _build_runtime_engine(database_url)
         storage_root = Path(tempfile.mkdtemp(prefix="story_engine_pgpub_storage_"))
         monkeypatch.setenv("DATABASE_URL", database_url)
