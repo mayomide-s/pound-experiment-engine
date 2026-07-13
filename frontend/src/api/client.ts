@@ -89,6 +89,40 @@ export type PublicCheckoutStatusResponse = {
   completed_at?: string | null;
 };
 
+export type PublicExperimentStatsResponse = {
+  campaign_slug: string;
+  participant_count: number;
+  amount_collected_minor: number;
+  currency: string;
+  updated_at: string;
+};
+
+export type AdminExperimentSourceAnalyticsResponse = {
+  source_code: string;
+  checkout_sessions_started: number;
+  completed_payments: number;
+  amount_collected_minor: number;
+};
+
+export type AdminExperimentRecentPaymentResponse = {
+  completed_at: string;
+  amount_minor: number;
+  currency: string;
+  source_code: string;
+};
+
+export type AdminExperimentAnalyticsResponse = {
+  campaign_slug: string;
+  checkout_sessions_started: number;
+  completed_payments: number;
+  payments_today: number;
+  amount_collected_minor: number;
+  currency: string;
+  conversion_rate: number;
+  top_sources: AdminExperimentSourceAnalyticsResponse[];
+  recent_payments: AdminExperimentRecentPaymentResponse[];
+};
+
 export type CreativeVariant = {
   id: string;
   campaign_id: string;
@@ -742,8 +776,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  getPublicExperimentStats: () =>
+    request<PublicExperimentStatsResponse>("/public/experiment-stats"),
   getPublicCheckoutStatus: (checkoutSessionId: string) =>
     request<PublicCheckoutStatusResponse>(`/public/checkout-sessions/${checkoutSessionId}`),
+  getExperimentAnalytics: () =>
+    request<AdminExperimentAnalyticsResponse>("/admin/experiment-analytics"),
   getRun: (runId: string) => request<PipelineRunDetail>(`/pipeline-runs/${runId}`),
   resumeRun: (runId: string, reviewNotes = "", confirmPaidGeneration = false) =>
     request<PipelineRunDetail>(`/pipeline-runs/${runId}/resume`, {

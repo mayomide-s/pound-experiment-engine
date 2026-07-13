@@ -2,9 +2,13 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, type PublicCheckoutStatusResponse } from "../api/client";
+import {
+  api,
+  type PublicCheckoutStatusResponse,
+  type PublicExperimentStatsResponse,
+} from "../api/client";
 import { ExperimentThankYouPage } from "./ExperimentThankYou";
-import { PublicExperimentPage } from "./PublicExperiment";
+import { normalizePublicSourceCode, PublicExperimentPage } from "./PublicExperiment";
 
 function mockLocationAssign() {
   const assign = vi.fn();
@@ -22,7 +26,7 @@ function renderPublicExperiment(initialEntry = "/experiment") {
         <Route path="/experiment" element={<PublicExperimentPage />} />
         <Route path="/experiment/thank-you" element={<ExperimentThankYouPage />} />
       </Routes>
-    </MemoryRouter>
+    </MemoryRouter>,
   );
 }
 
@@ -32,7 +36,7 @@ function renderThankYou(initialEntry = "/experiment/thank-you?session_id=cs_test
       <Routes>
         <Route path="/experiment/thank-you" element={<ExperimentThankYouPage />} />
       </Routes>
-    </MemoryRouter>
+    </MemoryRouter>,
   );
 }
 
@@ -41,6 +45,13 @@ beforeEach(() => {
     checkout_session_id: "cs_test_123",
     checkout_url: "https://checkout.stripe.test/session/cs_test_123",
   });
+  vi.spyOn(api, "getPublicExperimentStats").mockResolvedValue({
+    campaign_slug: "the-one-pound-experiment",
+    participant_count: 12,
+    amount_collected_minor: 1200,
+    currency: "GBP",
+    updated_at: "2026-07-13T12:00:00Z",
+  } satisfies PublicExperimentStatsResponse);
   vi.spyOn(api, "getPublicCheckoutStatus").mockResolvedValue({
     status: "completed",
     payment_status: "paid",
@@ -53,6 +64,7 @@ beforeEach(() => {
     configurable: true,
     value: { writeText: vi.fn().mockResolvedValue(undefined) },
   });
+  window.sessionStorage.clear();
 });
 
 afterEach(() => {
@@ -61,27 +73,31 @@ afterEach(() => {
 });
 
 describe("Public experiment landing page", () => {
-  it("renders the public landing page with required disclosures", () => {
+  it("renders the public landing page with required disclosures and live counter", async () => {
     renderPublicExperiment();
 
-    expect(screen.getByText("Would you give a stranger £1?")).toBeInTheDocument();
-    expect(screen.getAllByText("Send £1")).toHaveLength(2);
+    expect(screen.getByText(/Would you give a stranger/i)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Send/i })).toHaveLength(2);
     expect(screen.getByText("Secure payment handled by Stripe.")).toBeInTheDocument();
     expect(screen.getByText("No product")).toBeInTheDocument();
     expect(screen.getByText("No charity")).toBeInTheDocument();
     expect(screen.getByText("No prize")).toBeInTheDocument();
     expect(screen.getByText("No financial return")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("12 people said yes")).toBeInTheDocument();
+      expect(screen.getByText(/12\.00 collected so far\./)).toBeInTheDocument();
+    });
   });
 
-  it("shows loading state and redirects using the returned checkout URL", async () => {
+  it("normalizes the shared source code and redirects using the returned checkout URL", async () => {
     const assign = mockLocationAssign();
-    renderPublicExperiment("/experiment?source_code=tiktok.bio");
+    renderPublicExperiment("/experiment?source_code=%20TikTok_Ad%20");
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Send £1" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /Send/i })[0]);
 
     expect(screen.getAllByText("Starting secure checkout...")[0]).toBeInTheDocument();
     await waitFor(() => {
-      expect(api.createPublicCheckoutSession).toHaveBeenCalledWith({ source_code: "tiktok.bio" });
+      expect(api.createPublicCheckoutSession).toHaveBeenCalledWith({ source_code: "tiktok_ad" });
       expect(assign).toHaveBeenCalledWith("https://checkout.stripe.test/session/cs_test_123");
     });
   });
@@ -90,18 +106,65 @@ describe("Public experiment landing page", () => {
     vi.mocked(api.createPublicCheckoutSession).mockRejectedValueOnce(new Error("Checkout temporarily unavailable"));
     renderPublicExperiment();
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Send £1" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /Send/i })[0]);
 
     await waitFor(() => {
       expect(screen.getByText("Checkout temporarily unavailable")).toBeInTheDocument();
     });
   });
 
-  it("ignores invalid source codes safely and shows cancellation state", () => {
-    renderPublicExperiment("/experiment?checkout=cancelled&source_code=bad code");
+  it("falls back invalid source codes to direct and shows cancellation state", async () => {
+    renderPublicExperiment("/experiment?checkout=cancelled&source_code=bad%20code");
 
-    expect(screen.getByText("Payment cancelled — no payment was taken.")).toBeInTheDocument();
+    expect(screen.getByText(/Payment cancelled/i)).toBeInTheDocument();
     expect(screen.getByText(/ignored safely/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(api.getPublicExperimentStats).toHaveBeenCalled();
+    });
+  });
+
+  it("refreshes the live counter when a completion refresh event is dispatched", async () => {
+    const refreshedStats = {
+      campaign_slug: "the-one-pound-experiment",
+      participant_count: 13,
+      amount_collected_minor: 1300,
+      currency: "GBP",
+      updated_at: "2026-07-13T12:01:00Z",
+    } satisfies PublicExperimentStatsResponse;
+    vi.mocked(api.getPublicExperimentStats)
+      .mockResolvedValueOnce({
+        campaign_slug: "the-one-pound-experiment",
+        participant_count: 12,
+        amount_collected_minor: 1200,
+        currency: "GBP",
+        updated_at: "2026-07-13T12:00:00Z",
+      })
+      .mockResolvedValueOnce(refreshedStats);
+
+    renderPublicExperiment();
+
+    await waitFor(() => {
+      expect(screen.getByText("12 people said yes")).toBeInTheDocument();
+    });
+
+    window.dispatchEvent(new CustomEvent("public-experiment-stats-refresh"));
+
+    await waitFor(() => {
+      expect(screen.getByText("13 people said yes")).toBeInTheDocument();
+      expect(screen.getByText(/13\.00 collected so far\./)).toBeInTheDocument();
+    });
+  });
+});
+
+describe("Public source normalization", () => {
+  it("applies the same normalization rules as the backend", () => {
+    expect(normalizePublicSourceCode(null)).toBe("direct");
+    expect(normalizePublicSourceCode("")).toBe("direct");
+    expect(normalizePublicSourceCode(" TikTok_Ad ")).toBe("tiktok_ad");
+    expect(normalizePublicSourceCode("newsletter")).toBe("newsletter");
+    expect(normalizePublicSourceCode("bad.code")).toBe("direct");
+    expect(normalizePublicSourceCode("bad code")).toBe("direct");
+    expect(normalizePublicSourceCode("x".repeat(65))).toBe("direct");
   });
 });
 
@@ -111,7 +174,7 @@ describe("Experiment thank-you page", () => {
 
     expect(screen.getByText("Verifying your participation...")).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByText("Thank you — you’re part of the experiment.")).toBeInTheDocument();
+      expect(screen.getByText("Thank you - you're part of the experiment.")).toBeInTheDocument();
       expect(screen.getByText("Your £1 participation was received successfully.")).toBeInTheDocument();
     });
   });
@@ -128,7 +191,7 @@ describe("Experiment thank-you page", () => {
 
     renderThankYou();
     await vi.runAllTimersAsync();
-    expect(screen.getByText("We’re still verifying the payment.")).toBeInTheDocument();
+    expect(screen.getByText("We're still verifying the payment.")).toBeInTheDocument();
 
     for (let index = 0; index < 4; index += 1) {
       await vi.advanceTimersByTimeAsync(1200);
@@ -141,7 +204,7 @@ describe("Experiment thank-you page", () => {
     renderThankYou("/experiment/thank-you?session_id=invalid");
 
     await waitFor(() => {
-      expect(screen.getByText("We couldn’t confirm this session yet.")).toBeInTheDocument();
+      expect(screen.getByText("We couldn't confirm this session yet.")).toBeInTheDocument();
       expect(screen.getByText("The return session looked invalid.")).toBeInTheDocument();
     });
   });
@@ -159,9 +222,22 @@ describe("Experiment thank-you page", () => {
     renderThankYou();
 
     await waitFor(() => {
-      expect(screen.getByText("This checkout didn’t complete.")).toBeInTheDocument();
+      expect(screen.getByText("This checkout didn't complete.")).toBeInTheDocument();
       expect(screen.getByText("No confirmed payment was recorded for this session.")).toBeInTheDocument();
     });
+  });
+
+  it("keeps the normalized source when linking back to the experiment page", async () => {
+    renderThankYou("/experiment/thank-you?session_id=cs_test_123&source=%20TikTok_Ad%20");
+
+    await waitFor(() => {
+      expect(screen.getByText("Thank you - you're part of the experiment.")).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("link", { name: "Back to the experiment page" })).toHaveAttribute(
+      "href",
+      "/experiment?source=tiktok_ad",
+    );
   });
 
   it("shares the experiment link without including the session id", async () => {
@@ -170,7 +246,7 @@ describe("Experiment thank-you page", () => {
     renderThankYou();
 
     await waitFor(() => {
-      expect(screen.getByText("Thank you — you’re part of the experiment.")).toBeInTheDocument();
+      expect(screen.getByText("Thank you - you're part of the experiment.")).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Copy experiment link" }));

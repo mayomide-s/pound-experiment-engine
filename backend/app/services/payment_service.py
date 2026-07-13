@@ -1,21 +1,34 @@
 from __future__ import annotations
 
 import logging
+import re
+from collections.abc import Sequence
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from urllib.parse import urlencode
 from typing import Any
 
 import stripe
+from sqlalchemy import case, desc, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.models import Campaign, CheckoutSessionRecord, CheckoutSessionRecordStatus
-from app.schemas.payments import PublicCheckoutStatusResponse
+from app.schemas.payments import (
+    AdminExperimentAnalyticsResponse,
+    AdminExperimentRecentPaymentResponse,
+    AdminExperimentSourceAnalyticsResponse,
+    PublicCheckoutStatusResponse,
+    PublicExperimentStatsResponse,
+)
 
 
 logger = logging.getLogger(__name__)
 EXPERIMENT_TYPE = "one-pound-experiment"
+DEFAULT_SOURCE_CODE = "direct"
+SOURCE_CODE_PATTERN = re.compile(r"^[a-z0-9_-]{1,64}$")
 
 
 class StripeUnavailableError(RuntimeError):
@@ -70,12 +83,25 @@ def resolve_public_experiment_campaign(db: Session, settings: Settings | None = 
     return campaign
 
 
-def build_public_checkout_urls(settings: Settings | None = None) -> tuple[str, str]:
+def normalize_source_code(source_code: str | None) -> str:
+    if source_code is None:
+        return DEFAULT_SOURCE_CODE
+    normalized = str(source_code).strip().lower()
+    if not normalized or not SOURCE_CODE_PATTERN.fullmatch(normalized):
+        return DEFAULT_SOURCE_CODE
+    return normalized
+
+
+def build_public_checkout_urls(settings: Settings | None = None, *, source_code: str | None = None) -> tuple[str, str]:
     active_settings = ensure_stripe_enabled(settings)
     base_url = active_settings.normalized_public_site_base_url()
+    normalized_source_code = normalize_source_code(source_code)
+    extra_query = ""
+    if normalized_source_code != DEFAULT_SOURCE_CODE:
+        extra_query = f"&{urlencode({'source': normalized_source_code})}"
     return (
-        f"{base_url}/experiment/thank-you?session_id={{CHECKOUT_SESSION_ID}}",
-        f"{base_url}/experiment?checkout=cancelled",
+        f"{base_url}/experiment/thank-you?session_id={{CHECKOUT_SESSION_ID}}{extra_query}",
+        f"{base_url}/experiment?checkout=cancelled{extra_query}",
     )
 
 
@@ -100,7 +126,8 @@ def create_public_checkout_session(db: Session, *, source_code: str | None = Non
     if campaign.target_amount_minor <= 0:
         raise StripeUnavailableError("The public experiment amount is not configured correctly.")
 
-    success_url, cancel_url = build_public_checkout_urls(settings)
+    normalized_source_code = normalize_source_code(source_code)
+    success_url, cancel_url = build_public_checkout_urls(settings, source_code=normalized_source_code)
     client = get_stripe_client()
     try:
         session_obj = client.checkout.Session.create(
@@ -121,7 +148,7 @@ def create_public_checkout_session(db: Session, *, source_code: str | None = Non
                 "campaign_id": campaign.id,
                 "campaign_slug": campaign.slug,
                 "experiment_type": EXPERIMENT_TYPE,
-                **({"source_code": source_code} if source_code else {}),
+                "source_code": normalized_source_code,
             },
         )
     except Exception as exc:
@@ -134,10 +161,11 @@ def create_public_checkout_session(db: Session, *, source_code: str | None = Non
         currency=campaign.currency.upper(),
         amount_total_minor=campaign.target_amount_minor,
         payment_status=getattr(session_obj, "payment_status", None) or _get_object_value(session_obj, "payment_status"),
-        source_code=source_code,
+        source_code=normalized_source_code,
         metadata_json={
             "campaign_slug": campaign.slug,
             "experiment_type": EXPERIMENT_TYPE,
+            "source_code": normalized_source_code,
         },
     )
     db.add(record)
@@ -221,6 +249,150 @@ def serialize_public_checkout_status(db: Session, checkout_session_id: str) -> P
         currency=record.currency,
         campaign_name=campaign_name,
         completed_at=record.completed_at,
+    )
+
+
+def _successful_completed_filters(campaign_id: str) -> list[Any]:
+    return [
+        CheckoutSessionRecord.campaign_id == campaign_id,
+        CheckoutSessionRecord.status == CheckoutSessionRecordStatus.COMPLETED,
+        CheckoutSessionRecord.payment_status == "paid",
+    ]
+
+
+def get_public_experiment_stats(db: Session, settings: Settings | None = None) -> PublicExperimentStatsResponse:
+    campaign = resolve_public_experiment_campaign(db, settings)
+    participant_count, amount_collected_minor, updated_at = (
+        db.query(
+            func.count(CheckoutSessionRecord.id),
+            func.coalesce(func.sum(CheckoutSessionRecord.amount_total_minor), 0),
+            func.max(CheckoutSessionRecord.updated_at),
+        )
+        .filter(*_successful_completed_filters(campaign.id))
+        .one()
+    )
+    return PublicExperimentStatsResponse(
+        campaign_slug=campaign.slug,
+        participant_count=int(participant_count or 0),
+        amount_collected_minor=int(amount_collected_minor or 0),
+        currency=campaign.currency.upper(),
+        updated_at=updated_at or campaign.updated_at or campaign.created_at or now_utc(),
+    )
+
+
+def _top_source_rows(db: Session, campaign_id: str) -> Sequence[Any]:
+    source_code = func.coalesce(CheckoutSessionRecord.source_code, DEFAULT_SOURCE_CODE)
+    successful_case = case(
+        (
+            (CheckoutSessionRecord.status == CheckoutSessionRecordStatus.COMPLETED)
+            & (CheckoutSessionRecord.payment_status == "paid"),
+            1,
+        ),
+        else_=0,
+    )
+    amount_case = case(
+        (
+            (CheckoutSessionRecord.status == CheckoutSessionRecordStatus.COMPLETED)
+            & (CheckoutSessionRecord.payment_status == "paid"),
+            CheckoutSessionRecord.amount_total_minor,
+        ),
+        else_=0,
+    )
+    return (
+        db.query(
+            source_code.label("source_code"),
+            func.count(CheckoutSessionRecord.id).label("checkout_sessions_started"),
+            func.sum(successful_case).label("completed_payments"),
+            func.coalesce(func.sum(amount_case), 0).label("amount_collected_minor"),
+        )
+        .filter(CheckoutSessionRecord.campaign_id == campaign_id)
+        .group_by(source_code)
+        .all()
+    )
+
+
+def get_private_experiment_analytics(db: Session, settings: Settings | None = None) -> AdminExperimentAnalyticsResponse:
+    campaign = resolve_public_experiment_campaign(db, settings)
+    checkout_sessions_started = int(
+        db.query(func.count(CheckoutSessionRecord.id))
+        .filter(CheckoutSessionRecord.campaign_id == campaign.id)
+        .scalar()
+        or 0
+    )
+    completed_payments, amount_collected_minor = (
+        db.query(
+            func.count(CheckoutSessionRecord.id),
+            func.coalesce(func.sum(CheckoutSessionRecord.amount_total_minor), 0),
+        )
+        .filter(*_successful_completed_filters(campaign.id))
+        .one()
+    )
+    start_of_day = now_utc().replace(hour=0, minute=0, second=0, microsecond=0)
+    payments_today = int(
+        db.query(func.count(CheckoutSessionRecord.id))
+        .filter(
+            *_successful_completed_filters(campaign.id),
+            CheckoutSessionRecord.completed_at >= start_of_day,
+        )
+        .scalar()
+        or 0
+    )
+    merged_source_totals: dict[str, dict[str, int]] = defaultdict(
+        lambda: {
+            "checkout_sessions_started": 0,
+            "completed_payments": 0,
+            "amount_collected_minor": 0,
+        }
+    )
+    for row in _top_source_rows(db, campaign.id):
+        normalized_source = normalize_source_code(row.source_code)
+        bucket = merged_source_totals[normalized_source]
+        bucket["checkout_sessions_started"] += int(row.checkout_sessions_started or 0)
+        bucket["completed_payments"] += int(row.completed_payments or 0)
+        bucket["amount_collected_minor"] += int(row.amount_collected_minor or 0)
+    top_sources = [
+        AdminExperimentSourceAnalyticsResponse(
+            source_code=source_code,
+            checkout_sessions_started=totals["checkout_sessions_started"],
+            completed_payments=totals["completed_payments"],
+            amount_collected_minor=totals["amount_collected_minor"],
+        )
+        for source_code, totals in sorted(
+            merged_source_totals.items(),
+            key=lambda item: (
+                -item[1]["completed_payments"],
+                -item[1]["checkout_sessions_started"],
+                item[0],
+            ),
+        )[:10]
+    ]
+    recent_payments = [
+        AdminExperimentRecentPaymentResponse(
+            completed_at=record.completed_at or now_utc(),
+            amount_minor=record.amount_total_minor,
+            currency=record.currency,
+            source_code=normalize_source_code(record.source_code),
+        )
+        for record in (
+            db.query(CheckoutSessionRecord)
+            .filter(*_successful_completed_filters(campaign.id))
+            .order_by(CheckoutSessionRecord.completed_at.desc(), CheckoutSessionRecord.updated_at.desc())
+            .limit(20)
+            .all()
+        )
+    ]
+    started_count = int(checkout_sessions_started or 0)
+    completed_count = int(completed_payments or 0)
+    return AdminExperimentAnalyticsResponse(
+        campaign_slug=campaign.slug,
+        checkout_sessions_started=started_count,
+        completed_payments=completed_count,
+        payments_today=payments_today,
+        amount_collected_minor=int(amount_collected_minor or 0),
+        currency=campaign.currency.upper(),
+        conversion_rate=(completed_count / started_count) if started_count else 0,
+        top_sources=top_sources,
+        recent_payments=recent_payments,
     )
 
 

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.payments import (
+    PublicExperimentStatsResponse,
     PublicCheckoutSessionCreateRequest,
     PublicCheckoutSessionResponse,
     PublicCheckoutStatusResponse,
@@ -14,6 +15,7 @@ from app.services.payment_service import (
     PublicExperimentCampaignNotFoundError,
     StripeUnavailableError,
     create_public_checkout_session,
+    get_public_experiment_stats,
     serialize_public_checkout_status,
 )
 
@@ -44,3 +46,16 @@ def get_public_checkout_session_status_endpoint(
         return serialize_public_checkout_status(db, checkout_session_id)
     except CheckoutSessionRecordNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+stats_router = APIRouter(prefix="/public", tags=["public-payments"])
+
+
+@stats_router.get("/experiment-stats", response_model=PublicExperimentStatsResponse)
+def get_public_experiment_stats_endpoint(db: Session = Depends(get_db)):
+    try:
+        return get_public_experiment_stats(db)
+    except StripeUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except PublicExperimentCampaignNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc

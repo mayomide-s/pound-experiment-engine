@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
-import { api, AccountDefaults, HealthDetails, PipelineRunDetail, PipelineRunSummary } from "../api/client";
+import {
+  api,
+  type AccountDefaults,
+  type AdminExperimentAnalyticsResponse,
+  type HealthDetails,
+  type PipelineRunDetail,
+  type PipelineRunSummary,
+} from "../api/client";
 import { EventTimeline } from "../components/EventTimeline";
 import { RunList, RunProviderFilter, RunStatusFilter } from "../components/RunList";
 import { AUDIENCE_LEVELS, CONTENT_FORMATS, STYLE_PRESETS, TARGET_PLATFORMS } from "../constants";
@@ -52,6 +59,15 @@ function formatQualityScore(value: unknown) {
 function formatDuration(value: unknown) {
   const seconds = typeof value === "number" ? value : Number(value);
   return Number.isFinite(seconds) ? `${seconds}s` : "n/a";
+}
+
+function formatMoney(amountMinor: number, currency: string) {
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amountMinor / 100);
 }
 
 function isOlderThanDays(value: string, days: number) {
@@ -130,6 +146,8 @@ export function DashboardPage() {
   const [healthDetails, setHealthDetails] = useState<HealthDetails | null>(null);
   const [featuredDemo, setFeaturedDemo] = useState<PipelineRunDetail | null>(null);
   const [defaults, setDefaults] = useState<AccountDefaults | null>(null);
+  const [experimentAnalytics, setExperimentAnalytics] = useState<AdminExperimentAnalyticsResponse | null>(null);
+  const [experimentAnalyticsError, setExperimentAnalyticsError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isResuming, setIsResuming] = useState(false);
   const [paidRunwayConfirmed, setPaidRunwayConfirmed] = useState(false);
@@ -267,6 +285,16 @@ export function DashboardPage() {
     setFeaturedDemo(fallback);
   }
 
+  async function loadExperimentAnalytics() {
+    try {
+      const payload = await api.getExperimentAnalytics();
+      setExperimentAnalytics(payload);
+      setExperimentAnalyticsError(null);
+    } catch (err) {
+      setExperimentAnalyticsError(err instanceof Error ? err.message : "Failed to load experiment analytics.");
+    }
+  }
+
   useEffect(() => {
     setArchivedRunIds(loadArchivedRunIds());
   }, []);
@@ -283,6 +311,7 @@ export function DashboardPage() {
       setDefaults(data);
       applyDefaults(data.account_config_json, { respectHandoffAndEdits: true });
     }).catch((err) => setError(err.message));
+    loadExperimentAnalytics().catch((err) => setExperimentAnalyticsError(err instanceof Error ? err.message : "Failed to load experiment analytics."));
     api.getHealthDetails().then(setHealthDetails).catch(() => undefined);
     loadRuns().catch((err) => setError(err.message));
   }, []);
@@ -711,6 +740,87 @@ export function DashboardPage() {
           onArchiveOldCorsRuns={handleArchiveOldCorsRuns}
         />
         <div className="stack">
+          <div className="panel detail-panel">
+            <div className="panel-header">
+              <h2>Experiment Analytics</h2>
+              <button className="secondary" type="button" onClick={() => loadExperimentAnalytics().catch(() => undefined)}>
+                Refresh
+              </button>
+            </div>
+            {experimentAnalytics ? (
+              <div className="stack">
+                <div className="key-grid">
+                  <div><span>Campaign</span><strong>{experimentAnalytics.campaign_slug}</strong></div>
+                  <div><span>Sessions Started</span><strong>{experimentAnalytics.checkout_sessions_started}</strong></div>
+                  <div><span>Completed Payments</span><strong>{experimentAnalytics.completed_payments}</strong></div>
+                  <div><span>Payments Today</span><strong>{experimentAnalytics.payments_today}</strong></div>
+                  <div><span>Amount Collected</span><strong>{formatMoney(experimentAnalytics.amount_collected_minor, experimentAnalytics.currency)}</strong></div>
+                  <div><span>Conversion Rate</span><strong>{(experimentAnalytics.conversion_rate * 100).toFixed(1)}%</strong></div>
+                </div>
+                <div className="public-section-grid">
+                  <article className="public-card">
+                    <h2>Top Sources</h2>
+                    {experimentAnalytics.top_sources.length > 0 ? (
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>Source</th>
+                            <th>Started</th>
+                            <th>Completed</th>
+                            <th>Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {experimentAnalytics.top_sources.map((source) => (
+                            <tr key={source.source_code}>
+                              <td>{source.source_code}</td>
+                              <td>{source.checkout_sessions_started}</td>
+                              <td>{source.completed_payments}</td>
+                              <td>{formatMoney(source.amount_collected_minor, experimentAnalytics.currency)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <p className="subtle">No source analytics yet.</p>
+                    )}
+                  </article>
+                  <article className="public-card">
+                    <h2>Recent Payments</h2>
+                    {experimentAnalytics.recent_payments.length > 0 ? (
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>Completed</th>
+                            <th>Source</th>
+                            <th>Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {experimentAnalytics.recent_payments.map((payment) => (
+                            <tr key={`${payment.completed_at}-${payment.source_code}`}>
+                              <td>{new Date(payment.completed_at).toLocaleString("en-GB", { hour12: false })}</td>
+                              <td>{payment.source_code}</td>
+                              <td>{formatMoney(payment.amount_minor, payment.currency)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <p className="subtle">No completed payments yet.</p>
+                    )}
+                  </article>
+                </div>
+              </div>
+            ) : experimentAnalyticsError ? (
+              <div className="notice-card warning">
+                <strong>Analytics unavailable</strong>
+                <p>{experimentAnalyticsError}</p>
+              </div>
+            ) : (
+              <p className="subtle">Loading experiment analytics...</p>
+            )}
+          </div>
           <div className="panel detail-panel">
             <div className="panel-header">
               <h2>Run Details</h2>

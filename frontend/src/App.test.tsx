@@ -53,7 +53,7 @@ describe("App routing", () => {
     render(
       <MemoryRouter initialEntries={["/"]}>
         <App />
-      </MemoryRouter>
+      </MemoryRouter>,
     );
 
     await waitFor(() => {
@@ -70,10 +70,10 @@ describe("App routing", () => {
     render(
       <MemoryRouter initialEntries={["/experiment"]}>
         <App />
-      </MemoryRouter>
+      </MemoryRouter>,
     );
 
-    expect(screen.getByText("Would you give a stranger £1?")).toBeInTheDocument();
+    expect(screen.getByText(/Would you give a stranger/i)).toBeInTheDocument();
     expect(screen.queryByText("Enter app access password")).not.toBeInTheDocument();
   });
 });

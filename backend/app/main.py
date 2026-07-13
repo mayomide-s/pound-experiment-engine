@@ -12,13 +12,14 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.db.session import SessionLocal
+from app.routers.admin_experiment import router as admin_experiment_router
 from app.routers.access import router as access_router
 from app.routers.asset_library import router as asset_library_router
 from app.routers.campaigns import router as campaigns_router
 from app.routers.idea_queue import router as idea_queue_router
 from app.routers.performance import router as performance_router
 from app.routers.pipeline_runs import router as pipeline_runs_router
-from app.routers.public_payments import router as public_payments_router
+from app.routers.public_payments import router as public_payments_router, stats_router as public_experiment_router
 from app.routers.publication_jobs import router as publication_jobs_router
 from app.routers.settings import router as settings_router
 from app.routers.social_connections import router as social_connections_router
@@ -80,7 +81,9 @@ app.include_router(asset_library_router, prefix=settings.api_prefix)
 app.include_router(settings_router, prefix=settings.api_prefix)
 app.include_router(social_connections_router, prefix=settings.api_prefix)
 app.include_router(publication_jobs_router, prefix=settings.api_prefix)
+app.include_router(admin_experiment_router, prefix=settings.api_prefix)
 app.include_router(public_payments_router, prefix=settings.api_prefix)
+app.include_router(public_experiment_router, prefix=settings.api_prefix)
 app.include_router(stripe_webhooks_router, prefix=settings.api_prefix)
 Path(settings.local_storage_path).mkdir(parents=True, exist_ok=True)
 app.mount("/assets", StaticFiles(directory=settings.local_storage_path), name="assets")

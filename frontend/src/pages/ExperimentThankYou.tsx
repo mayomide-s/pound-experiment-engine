@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { api, PublicCheckoutStatusResponse } from "../api/client";
+import { normalizePublicSourceCode, triggerPublicExperimentStatsRefresh } from "./PublicExperiment";
 
 const MAX_ATTEMPTS = 4;
 const RETRY_DELAY_MS = 1200;
@@ -22,8 +23,10 @@ export function ExperimentThankYouPage() {
   const timeoutRef = useRef<number | null>(null);
 
   const sessionId = searchParams.get("session_id") ?? "";
+  const normalizedSourceCode = normalizePublicSourceCode(searchParams.get("source"));
   const validSessionId = useMemo(() => (SESSION_ID_PATTERN.test(sessionId) ? sessionId : ""), [sessionId]);
   const canNativeShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
+  const experimentPath = normalizedSourceCode === "direct" ? "/experiment" : `/experiment?source=${encodeURIComponent(normalizedSourceCode)}`;
 
   useEffect(() => {
     document.title = "Thank you | The £1 Experiment";
@@ -45,6 +48,9 @@ export function ExperimentThankYouPage() {
         const payload = await api.getPublicCheckoutStatus(validSessionId);
         setStatus(payload);
         setError("");
+        if (payload.status === "completed") {
+          triggerPublicExperimentStatsRefresh();
+        }
         const needsRetry = payload.status !== "completed" && payload.payment_status !== "unpaid" && retryCountRef.current < MAX_ATTEMPTS - 1;
         if (needsRetry) {
           retryCountRef.current += 1;
@@ -98,25 +104,25 @@ export function ExperimentThankYouPage() {
           {isLoading ? <h1>Verifying your participation...</h1> : null}
           {!isLoading && !error && status?.status === "completed" ? (
             <>
-              <h1>Thank you — you’re part of the experiment.</h1>
+              <h1>Thank you - you're part of the experiment.</h1>
               <p>Your £1 participation was received successfully.</p>
             </>
           ) : null}
           {!isLoading && !error && isFailureStatus ? (
             <>
-              <h1>This checkout didn’t complete.</h1>
+              <h1>This checkout didn't complete.</h1>
               <p>No confirmed payment was recorded for this session.</p>
             </>
           ) : null}
           {!isLoading && !error && status?.status !== "completed" && !isFailureStatus ? (
             <>
-              <h1>We’re still verifying the payment.</h1>
+              <h1>We're still verifying the payment.</h1>
               <p>The browser return succeeded, but the webhook confirmation may still be arriving. This page retries a few times automatically.</p>
             </>
           ) : null}
           {!isLoading && error ? (
             <>
-              <h1>We couldn’t confirm this session yet.</h1>
+              <h1>We couldn't confirm this session yet.</h1>
               <p>{error}</p>
             </>
           ) : null}
@@ -137,7 +143,7 @@ export function ExperimentThankYouPage() {
             <a className="button-link secondary-link" href={`https://x.com/intent/post?text=${shareText}&url=${shareUrl}`} target="_blank" rel="noreferrer">Share on X</a>
           </div>
           {copyMessage ? <p className="subtle" role="status">{copyMessage}</p> : null}
-          <Link className="inline-link" to="/experiment">Back to the experiment page</Link>
+          <Link className="inline-link" to={experimentPath}>Back to the experiment page</Link>
         </section>
       </div>
     </main>

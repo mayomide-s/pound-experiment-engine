@@ -6,12 +6,13 @@ import stripe
 
 from app.config import get_settings
 from app.db.session import SessionLocal
-from app.models import Campaign, CheckoutSessionRecord
+from app.models import Campaign, CheckoutSessionRecord, CheckoutSessionRecordStatus
 from app.services.payment_service import (
     EXPERIMENT_TYPE,
     CheckoutSessionVerificationError,
     _ensure_checkout_session_matches_campaign,
     _get_metadata,
+    normalize_source_code,
     process_checkout_session_completed,
     resolve_public_experiment_campaign,
 )
@@ -107,8 +108,8 @@ def _build_stripe_event(event_id: str, session_payload: dict) -> stripe.Event:
     )
 
 
-def _create_public_campaign(client, slug: str = "the-one-pound-experiment") -> dict:
-    response = client.post("/api/campaigns", json=_campaign_payload(slug))
+def _create_public_campaign(client, slug: str = "the-one-pound-experiment", headers: dict | None = None) -> dict:
+    response = client.post("/api/campaigns", json=_campaign_payload(slug), headers=headers)
     if response.status_code == 200:
         return response.json()
     assert response.status_code == 409
@@ -130,13 +131,26 @@ def _create_public_campaign(client, slug: str = "the-one-pound-experiment") -> d
         }
 
 
-def _enable_stripe(monkeypatch):
+def _enable_stripe(monkeypatch, slug: str = "the-one-pound-experiment"):
     monkeypatch.setenv("STRIPE_ENABLED", "true")
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_123")
     monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
     monkeypatch.setenv("PUBLIC_SITE_BASE_URL", "http://localhost:5173/")
-    monkeypatch.setenv("PUBLIC_EXPERIMENT_CAMPAIGN_SLUG", "the-one-pound-experiment")
+    monkeypatch.setenv("PUBLIC_EXPERIMENT_CAMPAIGN_SLUG", slug)
     get_settings.cache_clear()
+
+
+def _enable_auth(monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("APP_ACCESS_PASSWORD", "open-sesame")
+    monkeypatch.setenv("APP_SESSION_SECRET", "session-secret")
+    get_settings.cache_clear()
+
+
+def _auth_headers(client):
+    login = client.post("/api/access/login", json={"password": "open-sesame"})
+    assert login.status_code == 200
+    return {"Authorization": f"Bearer {login.json()['token']}"}
 
 
 def test_public_checkout_returns_503_when_stripe_disabled(client):
@@ -171,7 +185,7 @@ def test_checkout_creation_uses_server_controlled_amount_currency_and_urls(clien
     monkeypatch.setattr("app.services.payment_service.get_stripe_client", lambda: fake_stripe)
     _create_public_campaign(client)
 
-    response = client.post("/api/public/checkout-sessions", json={"source_code": "bio.link_1"})
+    response = client.post("/api/public/checkout-sessions", json={"source_code": " TikTok_Ad "})
 
     assert response.status_code == 200
     payload = response.json()
@@ -184,19 +198,35 @@ def test_checkout_creation_uses_server_controlled_amount_currency_and_urls(clien
     assert created["line_items"][0]["quantity"] == 1
     assert created["line_items"][0]["price_data"]["unit_amount"] == 100
     assert created["line_items"][0]["price_data"]["currency"] == "gbp"
-    assert created["success_url"] == "http://localhost:5173/experiment/thank-you?session_id={CHECKOUT_SESSION_ID}"
-    assert created["cancel_url"] == "http://localhost:5173/experiment?checkout=cancelled"
+    assert created["success_url"] == "http://localhost:5173/experiment/thank-you?session_id={CHECKOUT_SESSION_ID}&source=tiktok_ad"
+    assert created["cancel_url"] == "http://localhost:5173/experiment?checkout=cancelled&source=tiktok_ad"
     assert created["metadata"]["campaign_slug"] == "the-one-pound-experiment"
-    assert created["metadata"]["source_code"] == "bio.link_1"
+    assert created["metadata"]["source_code"] == "tiktok_ad"
 
 
-def test_source_code_validation_rejects_unsafe_values(client, monkeypatch):
+def test_source_code_invalid_values_fall_back_to_direct(client, monkeypatch):
     _enable_stripe(monkeypatch)
+    fake_stripe = FakeStripeClient()
+    monkeypatch.setattr("app.services.payment_service.get_stripe_client", lambda: fake_stripe)
     _create_public_campaign(client)
 
     response = client.post("/api/public/checkout-sessions", json={"source_code": "bad code"})
 
-    assert response.status_code == 422
+    assert response.status_code == 200
+    created = fake_stripe.created_payloads[0]
+    assert created["metadata"]["source_code"] == "direct"
+    assert created["success_url"] == "http://localhost:5173/experiment/thank-you?session_id={CHECKOUT_SESSION_ID}"
+    assert created["cancel_url"] == "http://localhost:5173/experiment?checkout=cancelled"
+
+
+def test_normalize_source_code_rules():
+    assert normalize_source_code(None) == "direct"
+    assert normalize_source_code("") == "direct"
+    assert normalize_source_code("  TikTok  ") == "tiktok"
+    assert normalize_source_code("reddit_thread_1") == "reddit_thread_1"
+    assert normalize_source_code("bad.code") == "direct"
+    assert normalize_source_code("bad code") == "direct"
+    assert normalize_source_code("x" * 65) == "direct"
 
 
 def test_checkout_session_persistence_and_safe_status_response(client, monkeypatch):
@@ -335,7 +365,7 @@ def test_completed_webhook_processing_accepts_stripe_event_object_with_real_meta
     fake_stripe = FakeStripeClient()
     monkeypatch.setattr("app.services.payment_service.get_stripe_client", lambda: fake_stripe)
     campaign = _create_public_campaign(client)
-    created = client.post("/api/public/checkout-sessions", json={"source_code": "bio.tiktok"}).json()
+    created = client.post("/api/public/checkout-sessions", json={"source_code": "bio_tiktok"}).json()
     event = _build_stripe_event(
         "evt_completed_like_object",
         {
@@ -353,7 +383,7 @@ def test_completed_webhook_processing_accepts_stripe_event_object_with_real_meta
                 "campaign_id": campaign["id"],
                 "campaign_slug": "the-one-pound-experiment",
                 "experiment_type": "one-pound-experiment",
-                "source_code": "bio.tiktok",
+                "source_code": "bio_tiktok",
             },
         },
     )
@@ -387,7 +417,7 @@ def test_completed_webhook_processing_and_duplicate_idempotency(client, monkeypa
     fake_stripe = FakeStripeClient(construct_stripe_event=True)
     monkeypatch.setattr("app.services.payment_service.get_stripe_client", lambda: fake_stripe)
     campaign = _create_public_campaign(client)
-    created = client.post("/api/public/checkout-sessions", json={"source_code": "bio.tiktok"}).json()
+    created = client.post("/api/public/checkout-sessions", json={"source_code": "bio_tiktok"}).json()
     fake_stripe.retrieve_payloads[created["checkout_session_id"]] = FakeStripeSession(
         id=created["checkout_session_id"],
         payment_status="paid",
@@ -402,7 +432,7 @@ def test_completed_webhook_processing_and_duplicate_idempotency(client, monkeypa
             "campaign_id": campaign["id"],
             "campaign_slug": "the-one-pound-experiment",
             "experiment_type": "one-pound-experiment",
-            "source_code": "bio.tiktok",
+            "source_code": "bio_tiktok",
         },
     )
     event = {
@@ -498,3 +528,180 @@ def test_unknown_public_checkout_status_returns_404(client, monkeypatch):
     response = client.get("/api/public/checkout-sessions/cs_missing")
 
     assert response.status_code == 404
+
+
+def test_public_experiment_stats_returns_zero_when_no_completed_payments(client, monkeypatch):
+    slug = f"the-one-pound-experiment-{uuid4().hex[:8]}"
+    _enable_stripe(monkeypatch, slug=slug)
+    _create_public_campaign(client, slug=slug)
+    client.post("/api/public/checkout-sessions", json={"source_code": "tiktok"})
+
+    response = client.get("/api/public/experiment-stats")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["campaign_slug"] == slug
+    assert payload["participant_count"] == 0
+    assert payload["amount_collected_minor"] == 0
+    assert payload["currency"] == "GBP"
+    assert payload["updated_at"].endswith("Z")
+
+
+def test_public_experiment_stats_and_admin_analytics_include_completed_paid_checkouts_only(client, monkeypatch):
+    slug = f"the-one-pound-experiment-{uuid4().hex[:8]}"
+    _enable_stripe(monkeypatch, slug=slug)
+    campaign = _create_public_campaign(client, slug=slug)
+    _enable_auth(monkeypatch)
+    fake_stripe = FakeStripeClient(construct_stripe_event=True)
+    monkeypatch.setattr("app.services.payment_service.get_stripe_client", lambda: fake_stripe)
+
+    completed_ids = []
+    for source_code in ["reddit", "reddit", "direct"]:
+        created = client.post("/api/public/checkout-sessions", json={"source_code": source_code}).json()
+        completed_ids.append(created["checkout_session_id"])
+        fake_stripe.retrieve_payloads[created["checkout_session_id"]] = FakeStripeSession(
+            id=created["checkout_session_id"],
+            payment_status="paid",
+            status="complete",
+            currency="gbp",
+            amount_total=100,
+            mode="payment",
+            payment_intent=f"pi_{source_code}_{created['checkout_session_id']}",
+            customer=f"cus_{source_code}_{created['checkout_session_id']}",
+            customer_details={"email": "person@example.com"},
+            metadata={
+                "campaign_id": campaign["id"],
+                "campaign_slug": campaign["slug"],
+                "experiment_type": EXPERIMENT_TYPE,
+                "source_code": source_code,
+            },
+        )
+
+    open_session = client.post("/api/public/checkout-sessions", json={"source_code": "newsletter"}).json()
+
+    for index, checkout_session_id in enumerate(completed_ids):
+        event = {
+            "id": f"evt_completed_stats_{index}",
+            "type": "checkout.session.completed",
+            "data": {"object": dict(fake_stripe.retrieve_payloads[checkout_session_id].__dict__)},
+        }
+        response = client.post("/api/webhooks/stripe", content=json.dumps(event), headers={"Stripe-Signature": "valid-signature"})
+        assert response.status_code == 200
+
+    replay_event = {
+        "id": "evt_completed_stats_0",
+        "type": "checkout.session.completed",
+        "data": {"object": dict(fake_stripe.retrieve_payloads[completed_ids[0]].__dict__)},
+    }
+    replay_response = client.post("/api/webhooks/stripe", content=json.dumps(replay_event), headers={"Stripe-Signature": "valid-signature"})
+    assert replay_response.status_code == 200
+    assert replay_response.json()["already_processed"] is True
+
+    public_response = client.get("/api/public/experiment-stats")
+    assert public_response.status_code == 200
+    public_payload = public_response.json()
+    assert public_payload["participant_count"] == 3
+    assert public_payload["amount_collected_minor"] == 300
+    assert public_payload["currency"] == "GBP"
+
+    admin_response = client.get("/api/admin/experiment-analytics", headers=_auth_headers(client))
+    assert admin_response.status_code == 200
+    admin_payload = admin_response.json()
+    assert admin_payload["campaign_slug"] == slug
+    assert admin_payload["checkout_sessions_started"] == 4
+    assert admin_payload["completed_payments"] == 3
+    assert admin_payload["payments_today"] == 3
+    assert admin_payload["amount_collected_minor"] == 300
+    assert admin_payload["currency"] == "GBP"
+    assert admin_payload["conversion_rate"] == 0.75
+    assert admin_payload["top_sources"][0]["source_code"] == "reddit"
+    assert admin_payload["top_sources"][0]["checkout_sessions_started"] == 2
+    assert admin_payload["top_sources"][0]["completed_payments"] == 2
+    assert admin_payload["top_sources"][0]["amount_collected_minor"] == 200
+    assert any(item["source_code"] == "newsletter" and item["completed_payments"] == 0 for item in admin_payload["top_sources"])
+    assert len(admin_payload["recent_payments"]) == 3
+    assert all(item["amount_minor"] == 100 for item in admin_payload["recent_payments"])
+    assert all("person@example.com" not in json.dumps(item) for item in admin_payload["recent_payments"])
+
+    with SessionLocal() as db:
+        completed_record = db.query(CheckoutSessionRecord).filter(
+            CheckoutSessionRecord.stripe_checkout_session_id == completed_ids[0]
+        ).one()
+        open_record = db.query(CheckoutSessionRecord).filter(
+            CheckoutSessionRecord.stripe_checkout_session_id == open_session["checkout_session_id"]
+        ).one()
+
+    assert completed_record.status.value == "completed"
+    assert completed_record.payment_status == "paid"
+    assert open_record.status.value == "open"
+
+
+def test_admin_experiment_analytics_requires_auth(client, monkeypatch):
+    slug = f"the-one-pound-experiment-{uuid4().hex[:8]}"
+    _enable_stripe(monkeypatch, slug=slug)
+    _create_public_campaign(client, slug=slug)
+    _enable_auth(monkeypatch)
+
+    response = client.get("/api/admin/experiment-analytics")
+
+    assert response.status_code == 401
+
+
+def test_experiment_analytics_endpoints_return_503_when_campaign_missing(client, monkeypatch):
+    slug = f"missing-public-campaign-{uuid4().hex[:8]}"
+    _enable_stripe(monkeypatch, slug=slug)
+    _enable_auth(monkeypatch)
+
+    public_response = client.get("/api/public/experiment-stats")
+    admin_response = client.get("/api/admin/experiment-analytics", headers=_auth_headers(client))
+
+    assert public_response.status_code == 503
+    assert admin_response.status_code == 503
+
+
+def test_experiment_analytics_endpoints_return_503_when_stripe_disabled(client, monkeypatch):
+    _enable_auth(monkeypatch)
+
+    public_response = client.get("/api/public/experiment-stats")
+    admin_response = client.get("/api/admin/experiment-analytics", headers=_auth_headers(client))
+
+    assert public_response.status_code == 503
+    assert admin_response.status_code == 503
+
+
+def test_admin_analytics_merges_legacy_invalid_sources_under_direct(client, monkeypatch):
+    slug = f"the-one-pound-experiment-{uuid4().hex[:8]}"
+    _enable_stripe(monkeypatch, slug=slug)
+    campaign = _create_public_campaign(client, slug=slug)
+
+    with SessionLocal() as db:
+        for stripe_checkout_session_id, source_code in [
+            ("cs_legacy_direct_null", None),
+            ("cs_legacy_direct_bad", "bad.code"),
+            ("cs_legacy_direct_upper", "DIRECT"),
+        ]:
+            db.add(
+                CheckoutSessionRecord(
+                    campaign_id=campaign["id"],
+                    stripe_checkout_session_id=stripe_checkout_session_id,
+                    status=CheckoutSessionRecordStatus.COMPLETED,
+                    currency="GBP",
+                    amount_total_minor=100,
+                    payment_status="paid",
+                    source_code=source_code,
+                    completed_at=None,
+                    metadata_json={},
+                )
+            )
+        db.commit()
+
+    _enable_auth(monkeypatch)
+    response = client.get("/api/admin/experiment-analytics", headers=_auth_headers(client))
+
+    assert response.status_code == 200
+    payload = response.json()
+    direct_rows = [row for row in payload["top_sources"] if row["source_code"] == "direct"]
+    assert len(direct_rows) == 1
+    assert direct_rows[0]["checkout_sessions_started"] == 3
+    assert direct_rows[0]["completed_payments"] == 3
+    assert direct_rows[0]["amount_collected_minor"] == 300
