@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
+import { PublicFooter } from "../components/PublicFooter";
 import { api, PublicCheckoutStatusResponse } from "../api/client";
 import { normalizePublicSourceCode, triggerPublicExperimentStatsRefresh } from "./PublicExperiment";
 
@@ -51,7 +52,10 @@ export function ExperimentThankYouPage() {
         if (payload.status === "completed") {
           triggerPublicExperimentStatsRefresh();
         }
-        const needsRetry = payload.status !== "completed" && payload.payment_status !== "unpaid" && retryCountRef.current < MAX_ATTEMPTS - 1;
+        const needsRetry =
+          payload.status !== "completed" &&
+          payload.payment_status !== "unpaid" &&
+          retryCountRef.current < MAX_ATTEMPTS - 1;
         if (needsRetry) {
           retryCountRef.current += 1;
           timeoutRef.current = window.setTimeout(() => {
@@ -145,6 +149,7 @@ export function ExperimentThankYouPage() {
           {copyMessage ? <p className="subtle" role="status">{copyMessage}</p> : null}
           <Link className="inline-link" to={experimentPath}>Back to the experiment page</Link>
         </section>
+        <PublicFooter />
       </div>
     </main>
   );

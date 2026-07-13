@@ -295,6 +295,14 @@ pre {
   gap: 1rem;
 }
 
+.public-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
 .public-hero,
 .public-card {
   background: rgba(255, 255, 255, 0.92);
@@ -366,6 +374,21 @@ pre {
   margin-top: 0;
 }
 
+.public-info-header {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.public-info-title {
+  margin: 0;
+  font-size: clamp(1.9rem, 4.5vw, 3rem);
+  line-height: 1.05;
+}
+
+.public-info-intro p {
+  margin: 0;
+}
+
 .public-steps {
   margin: 0;
   padding-left: 1.2rem;
@@ -373,10 +396,72 @@ pre {
   gap: 0.55rem;
 }
 
-.public-footer {
+.public-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.55rem;
+  color: #334155;
+}
+
+.public-card-wide {
+  width: 100%;
+}
+
+.public-policy-nav,
+.public-footer-nav,
+.public-link-list,
+.public-footer-copy {
   display: flex;
   flex-wrap: wrap;
-  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.public-policy-nav a,
+.public-footer-nav a {
+  text-decoration: none;
+  color: #2563EB;
+  font-weight: 600;
+}
+
+.public-policy-nav a:hover,
+.public-footer-nav a:hover {
+  text-decoration: underline;
+}
+
+.public-faq-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.public-faq-item {
+  border: 1px solid #DDE5F0;
+  border-radius: 14px;
+  background: #F8FAFC;
+  padding: 0.2rem 0.9rem 0.9rem;
+}
+
+.public-faq-item summary {
+  cursor: pointer;
+  list-style: none;
+  font-weight: 700;
+  color: #0F172A;
+  padding: 0.85rem 0 0.4rem;
+}
+
+.public-faq-item summary:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.22);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+
+.public-faq-item p {
+  margin: 0.35rem 0 0;
+  color: #334155;
+}
+
+.public-footer {
+  display: grid;
   gap: 0.75rem;
   padding: 0.25rem 0.2rem 1rem;
   color: #64748B;
@@ -409,6 +494,15 @@ pre {
 
   .public-section-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .public-card-wide {
+    grid-column: 1 / -1;
+  }
+
+  .public-footer {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
   }
 }
 
@@ -1174,5 +1268,13 @@ pre {
 
   .run-list-filter-grid {
     grid-template-columns: 1fr;
+  }
+
+  .public-policy-nav,
+  .public-footer-nav,
+  .public-link-list,
+  .public-footer-copy {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

@@ -13,8 +13,12 @@ import { SettingsPage } from "./pages/Settings";
 import { VideoReviewPage } from "./pages/VideoReview";
 import { PerformancePage } from "./pages/Performance";
 import { CampaignsPage } from "./pages/Campaigns";
+import { ContactPage } from "./pages/ContactPage";
 import { PublicExperimentPage } from "./pages/PublicExperiment";
 import { ExperimentThankYouPage } from "./pages/ExperimentThankYou";
+import { PrivacyPage } from "./pages/PrivacyPage";
+import { RefundsPage } from "./pages/RefundsPage";
+import { TermsPage } from "./pages/TermsPage";
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "story-engine-sidebar-collapsed";
 
@@ -31,9 +35,13 @@ export default function App() {
     }
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
   });
+  const publicRoutes = useMemo(
+    () => new Set(["/experiment", "/experiment/thank-you", "/experiment/cancelled", "/privacy", "/terms", "/refunds", "/contact"]),
+    [],
+  );
   const isPublicExperimentRoute = useMemo(
-    () => location.pathname === "/experiment" || location.pathname === "/experiment/thank-you" || location.pathname === "/experiment/cancelled",
-    [location.pathname],
+    () => publicRoutes.has(location.pathname),
+    [location.pathname, publicRoutes],
   );
 
   async function refreshAccessStatus() {
@@ -50,8 +58,13 @@ export default function App() {
   }
 
   useEffect(() => {
+    if (isPublicExperimentRoute) {
+      setIsCheckingAccess(false);
+      return;
+    }
+    setIsCheckingAccess(true);
     refreshAccessStatus().catch(() => undefined);
-  }, []);
+  }, [isPublicExperimentRoute]);
 
   useEffect(() => {
     function handleAccessExpired() {
@@ -98,6 +111,10 @@ export default function App() {
         <Route path="/experiment" element={<PublicExperimentPage />} />
         <Route path="/experiment/cancelled" element={<PublicExperimentPage />} />
         <Route path="/experiment/thank-you" element={<ExperimentThankYouPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/terms" element={<TermsPage />} />
+        <Route path="/refunds" element={<RefundsPage />} />
+        <Route path="/contact" element={<ContactPage />} />
       </Routes>
     );
   }
@@ -241,6 +258,10 @@ export default function App() {
           <Route path="/experiment" element={<PublicExperimentPage />} />
           <Route path="/experiment/cancelled" element={<PublicExperimentPage />} />
           <Route path="/experiment/thank-you" element={<ExperimentThankYouPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/terms" element={<TermsPage />} />
+          <Route path="/refunds" element={<RefundsPage />} />
+          <Route path="/contact" element={<ContactPage />} />
           <Route path="/queue" element={<IdeaQueuePage />} />
           <Route path="/assets" element={<AssetLibraryPage />} />
           <Route path="/app/batch-planner" element={<BatchPlannerPage />} />

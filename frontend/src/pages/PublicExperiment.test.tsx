@@ -8,7 +8,7 @@ import {
   type PublicExperimentStatsResponse,
 } from "../api/client";
 import { ExperimentThankYouPage } from "./ExperimentThankYou";
-import { normalizePublicSourceCode, PublicExperimentPage } from "./PublicExperiment";
+import { PublicExperimentPage, normalizePublicSourceCode } from "./PublicExperiment";
 
 function mockLocationAssign() {
   const assign = vi.fn();
@@ -41,6 +41,7 @@ function renderThankYou(initialEntry = "/experiment/thank-you?session_id=cs_test
 }
 
 beforeEach(() => {
+  vi.stubEnv("VITE_PUBLIC_CONTACT_EMAIL", "support@example.com");
   vi.spyOn(api, "createPublicCheckoutSession").mockResolvedValue({
     checkout_session_id: "cs_test_123",
     checkout_url: "https://checkout.stripe.test/session/cs_test_123",
@@ -69,23 +70,44 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
 describe("Public experiment landing page", () => {
-  it("renders the public landing page with required disclosures and live counter", async () => {
+  it("renders trust, how it works, faq, and footer links", async () => {
     renderPublicExperiment();
 
-    expect(screen.getByText(/Would you give a stranger/i)).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /Send/i })).toHaveLength(2);
-    expect(screen.getByText("Secure payment handled by Stripe.")).toBeInTheDocument();
-    expect(screen.getByText("No product")).toBeInTheDocument();
-    expect(screen.getByText("No charity")).toBeInTheDocument();
-    expect(screen.getByText("No prize")).toBeInTheDocument();
-    expect(screen.getByText("No financial return")).toBeInTheDocument();
+    expect(screen.getByText(/Would you give a stranger £1\?/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Trust and payment details" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "How it works" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Frequently asked questions" })).toBeInTheDocument();
+    expect(screen.getAllByText(/not a charitable donation/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Stripe handles those details/i)).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Privacy" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "Terms" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "Refunds" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "Contact" }).length).toBeGreaterThan(0);
     await waitFor(() => {
       expect(screen.getByText("12 people said yes")).toBeInTheDocument();
       expect(screen.getByText(/12\.00 collected so far\./)).toBeInTheDocument();
+    });
+  });
+
+  it("renders the public landing page with zero totals safely", async () => {
+    vi.mocked(api.getPublicExperimentStats).mockResolvedValueOnce({
+      campaign_slug: "the-one-pound-experiment",
+      participant_count: 0,
+      amount_collected_minor: 0,
+      currency: "GBP",
+      updated_at: "2026-07-13T12:00:00Z",
+    });
+
+    renderPublicExperiment();
+
+    await waitFor(() => {
+      expect(screen.getByText("0 people said yes")).toBeInTheDocument();
+      expect(screen.getByText(/0\.00 collected so far\./)).toBeInTheDocument();
     });
   });
 
@@ -93,7 +115,7 @@ describe("Public experiment landing page", () => {
     const assign = mockLocationAssign();
     renderPublicExperiment("/experiment?source_code=%20TikTok_Ad%20");
 
-    fireEvent.click(screen.getAllByRole("button", { name: /Send/i })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /Send £1/i })[0]);
 
     expect(screen.getAllByText("Starting secure checkout...")[0]).toBeInTheDocument();
     await waitFor(() => {
@@ -102,11 +124,28 @@ describe("Public experiment landing page", () => {
     });
   });
 
+  it("does not block checkout if the stats request fails", async () => {
+    vi.mocked(api.getPublicExperimentStats).mockRejectedValueOnce(new Error("stats unavailable"));
+    const assign = mockLocationAssign();
+    renderPublicExperiment();
+
+    await waitFor(() => {
+      expect(screen.getByText("Live totals are temporarily unavailable.")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Send £1/i })[0]);
+
+    await waitFor(() => {
+      expect(api.createPublicCheckoutSession).toHaveBeenCalled();
+      expect(assign).toHaveBeenCalledWith("https://checkout.stripe.test/session/cs_test_123");
+    });
+  });
+
   it("shows a retryable error when checkout creation fails", async () => {
     vi.mocked(api.createPublicCheckoutSession).mockRejectedValueOnce(new Error("Checkout temporarily unavailable"));
     renderPublicExperiment();
 
-    fireEvent.click(screen.getAllByRole("button", { name: /Send/i })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /Send £1/i })[0]);
 
     await waitFor(() => {
       expect(screen.getByText("Checkout temporarily unavailable")).toBeInTheDocument();
@@ -153,6 +192,18 @@ describe("Public experiment landing page", () => {
       expect(screen.getByText("13 people said yes")).toBeInTheDocument();
       expect(screen.getByText(/13\.00 collected so far\./)).toBeInTheDocument();
     });
+  });
+
+  it("renders faq questions and allows expansion", () => {
+    renderPublicExperiment();
+
+    const summary = screen.getByText("What is this?");
+    const details = summary.closest("details");
+    expect(details).not.toHaveAttribute("open");
+
+    fireEvent.click(summary);
+
+    expect(details).toHaveAttribute("open");
   });
 });
 

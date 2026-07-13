@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
+import { PublicContactDetails } from "../components/PublicContactDetails";
+import { PublicFooter } from "../components/PublicFooter";
+import { PublicPolicyNav } from "../components/PublicPolicyNav";
 import { api, type PublicExperimentStatsResponse } from "../api/client";
+import { FAQ_ITEMS, HOW_IT_WORKS_STEPS, MONEY_USE_STATEMENT, TRUST_POINTS } from "../public/content";
 
 const EXPERIMENT_URL = "/experiment";
 const DEFAULT_SOURCE_CODE = "direct";
@@ -159,17 +163,20 @@ export function PublicExperimentPage() {
     <main className="public-shell">
       <div className="public-page">
         <section className="public-hero">
+          <div className="public-header-row">
+            <span className="subtle">Voluntary public participation page</span>
+            <PublicPolicyNav className="public-policy-nav" />
+          </div>
           <p className="public-kicker">The £1 Experiment</p>
           <h1>Would you give a stranger £1?</h1>
           <p className="public-lead">
-            This is a transparent internet social experiment measuring how many people voluntarily send £1 to a stranger simply because they were asked.
+            This is a transparent social experiment measuring how many people voluntarily send £1 to a stranger simply because they were asked.
           </p>
           <div className="public-disclosure-strip" aria-label="Required disclosure">
-            <span>No product</span>
-            <span>No charity</span>
-            <span>No prize</span>
-            <span>No financial return</span>
-            <span>Participation is entirely voluntary</span>
+            <span>£1 participation</span>
+            <span>Not a product</span>
+            <span>Not a charity donation</span>
+            <span>Stripe-hosted checkout</span>
           </div>
           <div className="public-cta-block">
             <button type="button" className="public-primary-button" onClick={handleCheckout} disabled={isSubmitting}>
@@ -200,34 +207,65 @@ export function PublicExperimentPage() {
             {statsError ? <p className="notice-inline warning">{statsError}</p> : null}
           </article>
           <article className="public-card">
-            <h2>Why the counter matters</h2>
-            <p>Only completed, paid checkouts count. Open, expired, or failed sessions stay out of the public total so the number reflects confirmed participation.</p>
+            <h2>What happens to the money</h2>
+            <p>{MONEY_USE_STATEMENT}</p>
+          </article>
+        </section>
+
+        <section className="public-section-grid" aria-labelledby="trust-heading">
+          <article className="public-card public-card-wide">
+            <h2 id="trust-heading">Trust and payment details</h2>
+            <ul className="public-list">
+              {TRUST_POINTS.map((point) => (
+                <li key={point}>{point}</li>
+              ))}
+            </ul>
+            <p>
+              Contact: <PublicContactDetails className="inline-link" />
+            </p>
+          </article>
+        </section>
+
+        <section className="public-section-grid" aria-labelledby="how-it-works-heading">
+          <article className="public-card public-card-wide">
+            <h2 id="how-it-works-heading">How it works</h2>
+            <ol className="public-steps">
+              {HOW_IT_WORKS_STEPS.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ol>
           </article>
         </section>
 
         <section className="public-section-grid">
-          <article className="public-card">
-            <h2>How it works</h2>
-            <ol className="public-steps">
-              <li>You choose whether to take part.</li>
-              <li>Stripe handles a fixed £1 payment through hosted Checkout.</li>
-              <li>You return to a thank-you page once payment is complete.</li>
-            </ol>
-          </article>
           <article className="public-card">
             <h2>What happens after payment</h2>
             <p>Your £1 is recorded as voluntary participation in the experiment. It does not buy a product, enter a prize draw, or count as a charitable donation.</p>
+            <p>
+              If the browser returns before the total refreshes, the thank-you page retries while Stripe webhook confirmation catches up.
+            </p>
+          </article>
+          <article className="public-card">
+            <h2>Privacy and public display</h2>
+            <p>Public pages show aggregate totals only. Participant names, email addresses, payment details, Stripe identifiers, and backend IDs are not shown publicly.</p>
+            <div className="public-link-list">
+              <Link className="inline-link" to="/privacy">Read the Privacy Policy</Link>
+              <Link className="inline-link" to="/refunds">Read the Refund Policy</Link>
+            </div>
           </article>
         </section>
 
-        <section className="public-section-grid">
-          <article className="public-card">
-            <h2>Transparency first</h2>
-            <p>No fake statistics, no fabricated donor claims, no hidden upsell, and no claim that this payment will produce any financial return for you.</p>
-          </article>
-          <article className="public-card">
-            <h2>Privacy and payment security</h2>
-            <p>Payments are handled on Stripe-hosted pages. This site does not store card numbers, billing addresses, or payment-method details.</p>
+        <section className="public-section-grid" aria-labelledby="faq-heading">
+          <article className="public-card public-card-wide">
+            <h2 id="faq-heading">Frequently asked questions</h2>
+            <div className="public-faq-list">
+              {FAQ_ITEMS.map((item) => (
+                <details key={item.question} className="public-faq-item">
+                  <summary>{item.question}</summary>
+                  <p>{item.answer}</p>
+                </details>
+              ))}
+            </div>
           </article>
         </section>
 
@@ -239,10 +277,7 @@ export function PublicExperimentPage() {
           </button>
         </section>
 
-        <footer className="public-footer">
-          <span>Transparent internet social experiment.</span>
-          <Link to="/">Private Story Engine dashboard</Link>
-        </footer>
+        <PublicFooter />
       </div>
     </main>
   );

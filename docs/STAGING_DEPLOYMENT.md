@@ -151,8 +151,10 @@ Notes:
 Set these on the Vercel frontend project:
 
 - `VITE_API_BASE_URL=https://STAGING-BACKEND.onrender.com/api`
+- `VITE_PUBLIC_CONTACT_EMAIL=support@example.com`
 
 The frontend already reads `VITE_API_BASE_URL` from the existing code path in `frontend/src/api/client.ts`.
+The public legal/contact pages also read `VITE_PUBLIC_CONTACT_EMAIL` for the visible support address.
 
 ## Frontend Routing Notes
 

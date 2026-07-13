@@ -41,10 +41,19 @@ vi.mock("./pages/Campaigns", () => ({
 }));
 
 beforeEach(() => {
+  vi.stubEnv("VITE_PUBLIC_CONTACT_EMAIL", "support@example.com");
   vi.spyOn(api, "getAccessStatus").mockResolvedValue({ auth_enabled: false, authenticated: true, environment: "test" });
+  vi.spyOn(api, "getPublicExperimentStats").mockResolvedValue({
+    campaign_slug: "the-one-pound-experiment",
+    participant_count: 12,
+    amount_collected_minor: 1200,
+    currency: "GBP",
+    updated_at: "2026-07-13T12:00:00Z",
+  });
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -64,16 +73,23 @@ describe("App routing", () => {
     expect(screen.getByText("Campaigns")).toBeInTheDocument();
   });
 
-  it("renders the public experiment route without the private access gate", async () => {
+  it.each([
+    ["/experiment", /Would you give a stranger £1\?/i],
+    ["/privacy", "Privacy Policy"],
+    ["/terms", "Terms"],
+    ["/refunds", "Refund Policy"],
+    ["/contact", "Contact"],
+  ])("renders %s publicly without the private access gate", async (path, headingName) => {
     vi.mocked(api.getAccessStatus).mockResolvedValueOnce({ auth_enabled: true, authenticated: false, environment: "test" });
 
     render(
-      <MemoryRouter initialEntries={["/experiment"]}>
+      <MemoryRouter initialEntries={[path]}>
         <App />
       </MemoryRouter>,
     );
 
-    expect(screen.getByText(/Would you give a stranger/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: headingName })).toBeInTheDocument();
     expect(screen.queryByText("Enter app access password")).not.toBeInTheDocument();
+    expect(api.getAccessStatus).not.toHaveBeenCalled();
   });
 });
