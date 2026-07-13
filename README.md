@@ -39,10 +39,18 @@ Copy `.env.example` to `.env` and fill in only the mode you intend to run.
 Always required:
 
 - `DATABASE_URL`
-- `REDIS_URL`
 - `VIDEO_PROVIDER`
 - `STORAGE_PROVIDER`
 - `CORS_ALLOWED_ORIGINS`
+
+Optional for queue-backed and worker-backed features:
+
+- `REDIS_URL`
+
+Environment naming:
+
+- `APP_ENV` takes precedence when both `APP_ENV` and `ENVIRONMENT` are set
+- `ENVIRONMENT` remains supported for existing setups
 
 Optional for private staging mode:
 
@@ -384,6 +392,10 @@ Important notes:
 - Payment completion is only confirmed after the signed `checkout.session.completed` webhook is verified and stored.
 - The public status endpoint exposes only safe session status fields, never card data, Stripe secrets, or raw webhook payloads.
 - Production readiness is still outstanding for areas like live-mode activation, tax handling, emails, analytics, fraud controls, and operational monitoring.
+
+## Staging Deployment
+
+Repository-side staging preparation for Render + Vercel is documented in [docs/STAGING_DEPLOYMENT.md](docs/STAGING_DEPLOYMENT.md).
 
 ## Development Checks
 
