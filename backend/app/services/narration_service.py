@@ -39,6 +39,7 @@ from app.services.providers import (
     get_speech_provider,
     get_storage_provider,
 )
+from app.services.campaign_service import get_campaign_generation_context
 from app.services.security import redact_sensitive_data, sanitize_for_json
 
 AI_VOICE_DISCLOSURE = "AI-generated narration"
@@ -546,6 +547,7 @@ def _build_writer_payload(db: Session, run: PipelineRun, video: Video) -> dict[s
     storyboard = db.get(Storyboard, run.storyboard_id) if run.storyboard_id else None
     critic, human = _get_story_reviews(db, run.id, video.id)
     source_duration = float(video.duration_seconds or 10)
+    campaign_context = get_campaign_generation_context(db, run)
     return {
         "topic": run.topic,
         "audience_level": str((run.input_config_json or {}).get("audience_level") or "beginner"),
@@ -558,6 +560,16 @@ def _build_writer_payload(db: Session, run: PipelineRun, video: Video) -> dict[s
         "story_review_explanation": critic.explanation if critic else "",
         "human_story_review_notes": human.notes if human else "",
         "source_duration_seconds": source_duration,
+        "campaign_question": campaign_context.core_question if campaign_context else None,
+        "campaign_tone": campaign_context.tone if campaign_context else None,
+        "campaign_call_to_action": campaign_context.call_to_action if campaign_context else None,
+        "campaign_requested_duration_seconds": campaign_context.video_length_seconds if campaign_context else None,
+        "voiceover_enabled": campaign_context.voiceover_enabled if campaign_context else True,
+        "campaign_disclosure_requirements": (
+            "Keep the narration transparent, say participation is voluntary, and avoid charity, product, financial-return, or fabricated social-proof claims."
+            if campaign_context
+            else None
+        ),
     }
 
 

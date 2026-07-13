@@ -152,6 +152,17 @@ export type PipelineRunDetail = {
     low_score_warning?: boolean;
     summary?: string;
   } | null;
+  campaign_context?: {
+    campaign_name: string;
+    hook_type: string;
+    visual_type: string;
+    tone: string;
+    call_to_action: string;
+    requested_duration_seconds?: number | null;
+    effective_duration_seconds?: number | null;
+    voiceover_enabled: boolean;
+    text_density?: string | null;
+  } | null;
 };
 
 export type FinalAssetSelection = {

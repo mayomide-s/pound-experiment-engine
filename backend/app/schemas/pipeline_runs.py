@@ -142,3 +142,4 @@ class AggregatedPipelineRunResponse(BaseModel):
     performance_learnings_summary: dict[str, Any] | None = None
     review_sections: dict[str, str] | None = None
     review_preflight: dict[str, Any] | None = None
+    campaign_context: dict[str, Any] | None = None

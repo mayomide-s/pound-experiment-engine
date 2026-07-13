@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Any
+
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import Campaign, CreativeVariant
+from app.models import Campaign, CreativeVariant, PipelineRun
 from app.schemas.campaigns import CampaignCreate, CampaignUpdate, CreativeVariantCreate
 
 
@@ -13,6 +16,31 @@ class CampaignNotFoundError(ValueError):
 
 class CampaignConflictError(RuntimeError):
     """Raised when a campaign or creative variant hits a uniqueness conflict."""
+
+
+@dataclass(slots=True)
+class CampaignGenerationContext:
+    campaign_id: str
+    campaign_name: str
+    campaign_slug: str
+    core_question: str
+    campaign_description: str | None
+    landing_page_url: str | None
+    currency: str
+    target_amount_minor: int
+    target_reach: int
+    content_rules: dict[str, Any]
+    target_platforms: list[str]
+    creative_variant_id: str
+    tracking_code: str
+    hook_type: str
+    visual_type: str
+    tone: str
+    call_to_action: str
+    video_length_seconds: int | None
+    voiceover_enabled: bool
+    text_density: str | None
+    experiment_config: dict[str, Any]
 
 
 def _commit_or_rollback(db: Session) -> None:
@@ -87,4 +115,45 @@ def list_variants_for_campaign(db: Session, campaign_id: str) -> list[CreativeVa
         .filter(CreativeVariant.campaign_id == campaign_id)
         .order_by(CreativeVariant.created_at.desc())
         .all()
+    )
+
+
+def get_campaign_generation_context(db: Session, run: PipelineRun) -> CampaignGenerationContext | None:
+    if not run.campaign_id and not run.creative_variant_id:
+        return None
+    if not run.campaign_id or not run.creative_variant_id:
+        raise CampaignConflictError("Campaign-linked run is missing campaign or creative variant linkage")
+
+    campaign = db.get(Campaign, run.campaign_id)
+    if campaign is None:
+        raise CampaignNotFoundError("Campaign not found for pipeline run")
+
+    creative_variant = db.get(CreativeVariant, run.creative_variant_id)
+    if creative_variant is None:
+        raise CampaignNotFoundError("Creative variant not found for pipeline run")
+    if creative_variant.campaign_id != campaign.id:
+        raise CampaignConflictError("Creative variant does not belong to the pipeline run campaign")
+
+    return CampaignGenerationContext(
+        campaign_id=campaign.id,
+        campaign_name=campaign.name,
+        campaign_slug=campaign.slug,
+        core_question=campaign.core_question,
+        campaign_description=campaign.description,
+        landing_page_url=campaign.landing_page_url,
+        currency=campaign.currency,
+        target_amount_minor=campaign.target_amount_minor,
+        target_reach=campaign.target_reach,
+        content_rules=dict(campaign.content_rules_json or {}),
+        target_platforms=list(campaign.target_platforms_json or []),
+        creative_variant_id=creative_variant.id,
+        tracking_code=creative_variant.tracking_code,
+        hook_type=creative_variant.hook_type,
+        visual_type=creative_variant.visual_type,
+        tone=creative_variant.tone,
+        call_to_action=creative_variant.call_to_action,
+        video_length_seconds=creative_variant.video_length_seconds,
+        voiceover_enabled=creative_variant.voiceover_enabled,
+        text_density=creative_variant.text_density,
+        experiment_config=dict(creative_variant.experiment_config_json or {}),
     )

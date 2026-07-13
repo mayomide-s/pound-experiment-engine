@@ -314,6 +314,37 @@ npm run build
 - `GET /health`
 - `GET /health/details`
 
+## Campaign Generation Context
+
+Campaign-linked runs stay optional. Legacy runs still use the original Story Engine path, while runs with both `campaign_id` and `creative_variant_id` load a typed campaign generation context before idea, script, storyboard, prompt, narration, and manual-post packaging are built.
+
+The current campaign-aware generation flow uses these variant fields:
+
+- `hook_type`
+- `visual_type`
+- `tone`
+- `call_to_action`
+- `video_length_seconds`
+- `voiceover_enabled`
+- `text_density`
+- `tracking_code`
+- `experiment_config_json`
+
+Campaign fields such as the core question, campaign description, content rules, target platforms, landing page, and reach metadata also feed the same context. Internal attribution is persisted in existing JSON metadata fields with `generation_context_version=campaign_generation_v1`, while viewer-facing prompts and captions intentionally exclude tracking codes and internal IDs.
+
+Verified performance data is required before any social-proof claim can be generated. If verified values are not supplied in `experiment_config_json`, campaign hooks must avoid numeric participation claims, donor counts, milestones, testimonials, or invented percentages.
+
+To test safely without spending Runway credits, keep `VIDEO_PROVIDER=mock` and run:
+
+```bash
+cd backend
+pytest -q
+
+cd ../frontend
+npm test -- --run
+npm run build
+```
+
 ## Development Checks
 
 Backend:

@@ -7,6 +7,17 @@ from uuid import uuid4
 from app.config import Settings, get_settings
 from app.db.session import SessionLocal
 from app.models import CreativeVariant, PipelineRun
+from app.services.campaign_service import get_campaign_generation_context
+from app.services.narration_service import create_narration_draft
+from app.services.pipeline_service import (
+    build_campaign_caption,
+    build_campaign_idea_prompt,
+    get_run_campaign_context,
+    hook_type_guidance,
+    text_density_guidance,
+    tone_guidance,
+    visual_type_guidance,
+)
 from app.providers.storage.r2_provider import R2StorageProvider
 from app.providers.video.runway_provider import RunwayVideoProvider
 from app.services.security import sanitize_for_json
@@ -16,6 +27,42 @@ from app.workers.celery_app import celery_app
 def _runway_positive_prompt_body(prompt_preview: str) -> str:
     marker = "TEXT-FREE VIDEO. Do not render any words, letters, numbers, labels, captions, signs, logos, UI text, code, or subtitles."
     return prompt_preview.replace(marker, "").strip().lower()
+
+
+def _create_campaign_with_variant(client, *, voiceover_enabled: bool = False, video_length_seconds: int = 12, text_density: str = "medium") -> tuple[dict, dict]:
+    campaign = client.post(
+        "/api/campaigns",
+        json={
+            "name": "Campaign Run",
+            "slug": f"campaign-run-{uuid4().hex[:8]}",
+            "core_question": "Would you give a stranger £1?",
+            "description": "A transparent internet social experiment.",
+            "landing_page_url": "https://example.com/experiment?ref=secret",
+            "currency": "GBP",
+            "target_amount_minor": 100,
+            "target_reach": 10000000,
+            "content_rules_json": {
+                "rule_1": "no charity claims",
+                "rule_2": "no fake statistics",
+            },
+            "target_platforms_json": ["tiktok", "instagram", "youtube"],
+        },
+    ).json()
+    variant = client.post(
+        f"/api/campaigns/{campaign['id']}/variants",
+        json={
+            "hook_type": "direct_question",
+            "visual_type": "street_interview_style",
+            "tone": "curious",
+            "call_to_action": "Take part in the experiment.",
+            "video_length_seconds": video_length_seconds,
+            "voiceover_enabled": voiceover_enabled,
+            "text_density": text_density,
+            "tracking_code": f"track-{uuid4().hex[:8]}",
+            "experiment_config_json": {"verified_social_proof": "none"},
+        },
+    ).json()
+    return campaign, variant
 
 
 def test_create_run_pauses_before_video(client):
@@ -163,6 +210,189 @@ def test_legacy_pipeline_run_creation_without_campaign_data(client):
     payload = response.json()
     assert payload["pipeline_run"]["campaign_id"] is None
     assert payload["pipeline_run"]["creative_variant_id"] is None
+
+
+def test_generation_context_resolution_and_legacy_none(client):
+    campaign, variant = _create_campaign_with_variant(client)
+    response = client.post(
+        "/api/pipeline-runs",
+        json={
+            "topic": "Would you give a stranger £1?",
+            "auto_mode": False,
+            "campaign_id": campaign["id"],
+            "creative_variant_id": variant["id"],
+        },
+    )
+    run_id = response.json()["pipeline_run"]["id"]
+
+    with SessionLocal() as db:
+        run = db.get(PipelineRun, run_id)
+        assert run is not None
+        context = get_campaign_generation_context(db, run)
+        assert context is not None
+        assert context.campaign_id == campaign["id"]
+        assert context.creative_variant_id == variant["id"]
+        assert context.tracking_code == variant["tracking_code"]
+
+        legacy = db.get(PipelineRun, client.post("/api/pipeline-runs", json={"topic": "Plain legacy", "auto_mode": False}).json()["pipeline_run"]["id"])
+        assert legacy is not None
+        assert get_campaign_generation_context(db, legacy) is None
+
+
+def test_campaign_guidance_mappings_are_safe():
+    assert "campaign question" in hook_type_guidance("direct_question").lower()
+    assert "unknown percentage" in hook_type_guidance("statistic").lower()
+    assert "verified performance data" in hook_type_guidance("social_proof", {}).lower()
+    assert "parody" in visual_type_guidance("fake_news").lower()
+    assert "real interview" in visual_type_guidance("street_interview_style").lower()
+    assert "financial solicitation scam" in tone_guidance("serious").lower()
+    assert "readable" in text_density_guidance("high").lower()
+
+
+def test_campaign_prompt_fields_and_tracking_code_rules(client):
+    campaign, variant = _create_campaign_with_variant(client, video_length_seconds=9, text_density="high")
+    response = client.post(
+        "/api/pipeline-runs",
+        json={
+            "topic": "Would you give a stranger £1?",
+            "auto_mode": False,
+            "campaign_id": campaign["id"],
+            "creative_variant_id": variant["id"],
+        },
+    )
+    payload = response.json()
+    prompt_log = next(log for log in payload["prompt_logs"] if log["stage"] == "idea_generation")
+    prompt_text = prompt_log["prompt_text"]
+    assert campaign["core_question"] in prompt_text
+    assert variant["hook_type"] in prompt_text
+    assert variant["visual_type"] in prompt_text
+    assert variant["tone"] in prompt_text
+    assert variant["call_to_action"] in prompt_text
+    assert str(variant["video_length_seconds"]) in prompt_text
+    assert variant["text_density"] in prompt_text
+    assert "no charity claims" in prompt_text.lower()
+    assert variant["tracking_code"] in prompt_text
+    assert variant["tracking_code"] not in payload["prompt_preview"]
+
+
+def test_campaign_duration_metadata_and_provider_fallback(client, monkeypatch):
+    monkeypatch.setenv("VIDEO_PROVIDER", "runway")
+    get_settings.cache_clear()
+    campaign, variant = _create_campaign_with_variant(client, video_length_seconds=12)
+    response = client.post(
+        "/api/pipeline-runs",
+        json={
+            "topic": "Would you give a stranger £1?",
+            "auto_mode": False,
+            "campaign_id": campaign["id"],
+            "creative_variant_id": variant["id"],
+        },
+    )
+    payload = response.json()
+    assert payload["script"]["duration_seconds"] == 10
+    assert payload["script"]["script_json"]["requested_duration_seconds"] == 12
+    assert payload["campaign_context"]["requested_duration_seconds"] == 12
+    assert payload["campaign_context"]["effective_duration_seconds"] == 10
+    assert payload["prompt_preview"].startswith("TEXT-FREE VIDEO.")
+    get_settings.cache_clear()
+
+
+def test_campaign_script_storyboard_and_prompt_are_campaign_aware(client):
+    campaign, variant = _create_campaign_with_variant(client, text_density="low")
+    response = client.post(
+        "/api/pipeline-runs",
+        json={
+            "topic": "Would you give a stranger £1?",
+            "auto_mode": False,
+            "campaign_id": campaign["id"],
+            "creative_variant_id": variant["id"],
+        },
+    )
+    payload = response.json()
+    script_json = payload["script"]["script_json"]
+    storyboard = payload["storyboard"]["frames_json"]
+    assert script_json["campaign_generation"]["tracking_code"] == variant["tracking_code"]
+    assert script_json["campaign_generation"]["voiceover_enabled"] is False
+    assert any("Voluntary social experiment" in scene["on_screen_text"] for scene in script_json["scenes"])
+    assert storyboard["campaign_context_summary"]["visual_type"] == variant["visual_type"]
+    assert "transparent social experiment" in payload["prompt_preview"].lower()
+    assert variant["tracking_code"] not in payload["prompt_preview"]
+
+
+def test_campaign_posting_package_stays_safe_and_uses_link_in_bio(client):
+    campaign, variant = _create_campaign_with_variant(client)
+    created = client.post(
+        "/api/pipeline-runs",
+        json={
+            "topic": "Would you give a stranger £1?",
+            "auto_mode": False,
+            "campaign_id": campaign["id"],
+            "creative_variant_id": variant["id"],
+        },
+    )
+    run_id = created.json()["pipeline_run"]["id"]
+    resumed = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Looks good"})
+    payload = resumed.json()
+    package = payload["manual_post_package"]
+    assert "transparent social experiment" in package["caption"].lower()
+    assert "no product" in package["caption"].lower()
+    assert "no charity" in package["caption"].lower()
+    assert "link in bio" in package["caption"].lower()
+    assert "https://example.com" not in package["caption"].lower()
+    assert variant["tracking_code"] not in package["caption"]
+    assert payload["manual_post_package"]["platform_variants_json"]["campaign_generation"]["tracking_code"] == variant["tracking_code"]
+
+
+def test_voiceover_disabled_run_has_no_auto_narration_and_manual_narration_still_works(client, monkeypatch):
+    monkeypatch.setenv("NARRATION_ENABLED", "true")
+    get_settings.cache_clear()
+    campaign, variant = _create_campaign_with_variant(client, voiceover_enabled=False)
+    created = client.post(
+        "/api/pipeline-runs",
+        json={
+            "topic": "Would you give a stranger £1?",
+            "auto_mode": False,
+            "campaign_id": campaign["id"],
+            "creative_variant_id": variant["id"],
+        },
+    )
+    run_id = created.json()["pipeline_run"]["id"]
+    resumed = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Looks good"})
+    assert resumed.json()["narration_draft"] is None
+    with SessionLocal() as db:
+        draft = create_narration_draft(db, run_id)
+        assert draft.full_spoken_text
+    get_settings.cache_clear()
+
+
+def test_voiceover_enabled_narration_payload_preserves_campaign_fields(client, monkeypatch):
+    monkeypatch.setenv("NARRATION_ENABLED", "true")
+    get_settings.cache_clear()
+    campaign, variant = _create_campaign_with_variant(client, voiceover_enabled=True)
+    created = client.post(
+        "/api/pipeline-runs",
+        json={
+            "topic": "Would you give a stranger £1?",
+            "auto_mode": False,
+            "campaign_id": campaign["id"],
+            "creative_variant_id": variant["id"],
+        },
+    )
+    run_id = created.json()["pipeline_run"]["id"]
+    client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Looks good"})
+    with SessionLocal() as db:
+        draft = create_narration_draft(db, run_id)
+        assert "Would you give a stranger £1?" in draft.full_spoken_text
+        assert variant["call_to_action"] in draft.full_spoken_text
+    get_settings.cache_clear()
+
+
+def test_legacy_pipeline_prompt_remains_unchanged(client):
+    response = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
+    payload = response.json()
+    assert payload["campaign_context"] is None
+    assert "Would you give a stranger" not in payload["prompt_preview"]
+    assert "Campaign context" not in json.dumps(payload)
 
 
 def test_pipeline_run_rejects_reused_creative_variant(client):

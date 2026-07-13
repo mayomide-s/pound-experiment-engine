@@ -42,7 +42,12 @@ from app.services.final_asset_service import ensure_manual_package_final_asset_d
 from app.services.performance_learning_service import build_performance_learnings_summary
 from app.services.performance_winner_service import build_winner_selection_payload
 from app.services.providers import get_llm_provider, get_storage_provider, get_video_provider
-from app.services.campaign_service import CampaignConflictError, CampaignNotFoundError
+from app.services.campaign_service import (
+    CampaignConflictError,
+    CampaignGenerationContext,
+    CampaignNotFoundError,
+    get_campaign_generation_context,
+)
 from app.services.narration_service import build_narration_payloads
 from app.services.semantic_critic_service import (
     build_story_adherence_payload,
@@ -87,6 +92,17 @@ RUNWAY_STYLE_OVERRIDES = {
     "whiteboard_character": "minimal hand-drawn cartoon",
     "bug_monster": "playful bug-monster cartoon",
     "office_comedy": "stylized office comedy cartoon",
+}
+CAMPAIGN_GENERATION_CONTEXT_VERSION = "campaign_generation_v1"
+CAMPAIGN_DISCLOSURE_LINE = "Voluntary social experiment. No product. No charity."
+CAMPAIGN_PROHIBITED_CLAIMS = (
+    "Do not invent donors, payment totals, reach totals, percentages, testimonials, social proof, charity claims, emergency claims, investment claims, prizes, financial returns, or purchase claims."
+)
+CAMPAIGN_BASELINE_HASHTAGS = ["#socialexperiment", "#internetculture", "#humanbehaviour"]
+CAMPAIGN_SAFE_HASHTAGS = {
+    "tiktok": "#learnontiktok",
+    "instagram": "#reels",
+    "youtube": "#shorts",
 }
 
 
@@ -180,6 +196,128 @@ def build_run_input_config(account_config: dict[str, Any], payload: PipelineRunC
         "avoid_phrases": config["avoid_phrases"],
         "emoji_preference": config["emoji_preference"],
     }
+
+
+def hook_type_guidance(hook_type: str, experiment_config: dict[str, Any] | None = None) -> str:
+    safe_social_proof = experiment_config.get("verified_social_proof") if isinstance(experiment_config, dict) else None
+    mappings = {
+        "direct_question": "Open immediately with the campaign question as written.",
+        "challenge": "Frame the viewer as unlikely to participate without insulting or shaming them.",
+        "statistic": "Frame the hook around discovering an unknown percentage and never invent a result.",
+        "humour": "Use light self-aware humour while keeping the experiment transparent.",
+        "social_proof": (
+            f"Use only verified performance data supplied here: {safe_social_proof}."
+            if safe_social_proof
+            else "Avoid numerical social-proof claims unless verified performance data is supplied."
+        ),
+        "philosophical": "Frame the question around trust, generosity, curiosity, or internet behaviour.",
+    }
+    return mappings.get(hook_type, "Lead with curiosity about how strangers behave online without making unsupported claims.")
+
+
+def visual_type_guidance(visual_type: str) -> str:
+    mappings = {
+        "surreal": "Use surreal but readable visual metaphors that keep the question understandable in seconds.",
+        "satisfying": "Use clean, satisfying motion and progression beats that feel neat and rewarding to watch.",
+        "cinematic": "Use dramatic framing, controlled pacing, and polished vertical composition.",
+        "meme": "Use meme-aware exaggeration without relying on copyrighted characters or platform logos.",
+        "simulation": "Present the experiment as a stylised simulation, not a real dashboard or payment record.",
+        "fake_news": "Use obvious parody-news styling and do not impersonate any real broadcaster or journalist.",
+        "abstract": "Use a visually engaging abstract short-form concept with one clear takeaway.",
+        "street_interview_style": "Use staged street-interview-style framing without implying a real interview actually happened.",
+    }
+    return mappings.get(visual_type, "Use a visually engaging abstract short-form concept suited to vertical video.")
+
+
+def tone_guidance(tone: str) -> str:
+    mappings = {
+        "funny": "Keep the tone playful, transparent, and lightly funny.",
+        "mysterious": "Create curiosity early but reveal the nature of the experiment before the CTA.",
+        "serious": "Stay direct and transparent so the video does not feel like a financial solicitation scam.",
+        "confrontational": "Keep the tone playfully challenging and never abusive, threatening, or guilt-driven.",
+        "curious": "Sound exploratory and open-ended, like an honest internet behaviour test.",
+        "emotional": "Use warmth and human curiosity without guilt, tragedy, hardship, illness, or manipulation.",
+    }
+    return mappings.get(tone, "Keep the tone curious, transparent, and safe for a broad audience.")
+
+
+def text_density_guidance(text_density: str | None) -> str:
+    mappings = {
+        "low": "Use one primary hook, minimal secondary text, and a short CTA.",
+        "medium": "Use a hook, one supporting line, and a CTA.",
+        "high": "Use a hook, concise experiment explanation, and a CTA while staying readable.",
+    }
+    return mappings.get(text_density or "", "Keep overlays readable and concise for short-form vertical video.")
+
+
+def resolve_campaign_effective_duration(requested_duration: int | None, provider_name: str) -> int:
+    if requested_duration is None:
+        requested_duration = 18 if provider_name != "runway" else 10
+    if provider_name == "runway":
+        return min(max(int(requested_duration), 5), 10)
+    return min(max(int(requested_duration), 18), 30)
+
+
+def build_campaign_generation_metadata(
+    context: CampaignGenerationContext,
+    *,
+    requested_duration_seconds: int | None,
+    effective_duration_seconds: int,
+) -> dict[str, Any]:
+    return {
+        "campaign_id": context.campaign_id,
+        "creative_variant_id": context.creative_variant_id,
+        "tracking_code": context.tracking_code,
+        "hook_type": context.hook_type,
+        "visual_type": context.visual_type,
+        "tone": context.tone,
+        "call_to_action": context.call_to_action,
+        "requested_duration_seconds": requested_duration_seconds,
+        "effective_duration_seconds": effective_duration_seconds,
+        "voiceover_enabled": context.voiceover_enabled,
+        "text_density": context.text_density,
+        "generation_context_version": CAMPAIGN_GENERATION_CONTEXT_VERSION,
+    }
+
+
+def campaign_context_summary(context: CampaignGenerationContext, effective_duration_seconds: int | None = None) -> dict[str, Any]:
+    return {
+        "campaign_name": context.campaign_name,
+        "hook_type": context.hook_type,
+        "visual_type": context.visual_type,
+        "tone": context.tone,
+        "call_to_action": context.call_to_action,
+        "requested_duration_seconds": context.video_length_seconds,
+        "effective_duration_seconds": effective_duration_seconds,
+        "voiceover_enabled": context.voiceover_enabled,
+        "text_density": context.text_density,
+    }
+
+
+def get_run_campaign_context(db: Session, run: PipelineRun) -> CampaignGenerationContext | None:
+    return get_campaign_generation_context(db, run)
+
+
+def apply_campaign_defaults_to_run_config(
+    input_config: dict[str, Any],
+    payload: PipelineRunCreate,
+    context: CampaignGenerationContext | None,
+) -> dict[str, Any]:
+    if context is None:
+        return input_config
+    config = {**input_config}
+    if not payload.target_platforms and context.target_platforms:
+        config["target_platforms"] = list(context.target_platforms)
+    if context.video_length_seconds:
+        config["duration_preference_seconds"] = context.video_length_seconds
+    config["caption_tone"] = context.tone
+    config["preferred_cta"] = context.call_to_action
+    config["campaign_generation"] = build_campaign_generation_metadata(
+        context,
+        requested_duration_seconds=context.video_length_seconds,
+        effective_duration_seconds=resolve_campaign_effective_duration(context.video_length_seconds, get_settings().video_provider),
+    )
+    return sanitize_for_json(config)
 
 
 def build_idea_input_config(account_config: dict[str, Any], payload: dict[str, Any], existing: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -288,6 +426,20 @@ def get_target_duration_seconds(account_config: dict[str, Any] | None, provider_
     if provider_name == "runway":
         return min(max(configured_target, 5), 10)
     return min(max(configured_target, 18), 30)
+
+
+def get_effective_run_duration_seconds(
+    run: PipelineRun,
+    run_config: dict[str, Any],
+    provider_name: str,
+    campaign_context: CampaignGenerationContext | None = None,
+) -> tuple[int | None, int]:
+    requested_duration = campaign_context.video_length_seconds if campaign_context and campaign_context.video_length_seconds else None
+    if requested_duration is None:
+        requested_duration = int(run_config.get("duration_preference_seconds", 0) or 0) or None
+    if campaign_context and requested_duration is not None:
+        return requested_duration, resolve_campaign_effective_duration(requested_duration, provider_name)
+    return requested_duration, get_target_duration_seconds(run_config, provider_name)
 
 
 def get_style_preset(run: PipelineRun, account_config: dict[str, Any] | None) -> dict[str, str]:
@@ -737,6 +889,22 @@ def build_runway_motion_restrictions(contract: dict[str, Any]) -> str:
     return "new characters, location changes, random repeated actions, unresolved ending, or staying messy; finish the transformation"
 
 
+def build_runway_visual_only_prompt_from_text(visual_body: str, force_target: bool = False) -> str:
+    constraints = get_prompt_constraints("runway")
+    limit = constraints["target"]
+    prefix = RUNWAY_TEXT_FREE_BAN
+    body = " ".join(str(visual_body).split()).strip()
+    prompt = f"{prefix} {body}"
+    if len(prompt) <= limit:
+        return prompt
+
+    body_limit = max(limit - len(prefix) - 4, 1)
+    safe_body = body[:body_limit].rsplit(" ", 1)[0].rstrip(" ,;")
+    if not safe_body:
+        return compact_prompt_text(prefix, "runway", force_target=force_target)
+    return f"{prefix} {safe_body}..."
+
+
 def build_runway_visual_only_prompt(
     run: PipelineRun,
     idea: ContentIdea | None,
@@ -764,19 +932,7 @@ def build_runway_visual_only_prompt(
             f"Hold 8-10s: {sanitize_runway_visual_phrase(contract.get('prompt_final_hold', contract['final_state_hold']), run.topic)}. "
             f"Avoid {restrictions}."
         )
-    constraints = get_prompt_constraints("runway")
-    limit = constraints["target"]
-    prefix = RUNWAY_TEXT_FREE_BAN
-    body = " ".join(visual_body.split()).strip()
-    prompt = f"{prefix} {body}"
-    if len(prompt) <= limit:
-        return prompt
-
-    body_limit = max(limit - len(prefix) - 4, 1)
-    safe_body = body[:body_limit].rsplit(" ", 1)[0].rstrip(" ,;")
-    if not safe_body:
-        return compact_prompt_text(prefix, "runway", force_target=force_target)
-    return f"{prefix} {safe_body}..."
+    return build_runway_visual_only_prompt_from_text(visual_body, force_target=force_target)
 
 
 def build_prompt_from_scenes(
@@ -787,7 +943,16 @@ def build_prompt_from_scenes(
     scenes: list[dict[str, Any]],
     end_tag: str,
     provider_name: str,
+    campaign_context: CampaignGenerationContext | None = None,
 ) -> str:
+    if campaign_context:
+        _requested_duration, effective_duration = get_effective_run_duration_seconds(run, run_config, provider_name, campaign_context)
+        return build_campaign_video_prompt(
+            campaign_context,
+            provider_name=provider_name,
+            effective_duration_seconds=effective_duration,
+            end_tag=end_tag,
+        )
     if provider_name == "runway":
         return build_runway_visual_only_prompt(run, idea, preset, scenes)
 
@@ -1016,10 +1181,180 @@ def resolve_pipeline_campaign_context(
     return campaign, creative_variant
 
 
+def build_campaign_idea_prompt(
+    run: PipelineRun,
+    run_config: dict[str, Any],
+    context: CampaignGenerationContext,
+    *,
+    requested_duration_seconds: int | None,
+    effective_duration_seconds: int,
+) -> str:
+    content_rules = ", ".join(f"{key}: {value}" for key, value in (context.content_rules or {}).items()) or "none supplied"
+    return (
+        f"Create one short-form vertical video idea for the campaign question '{context.core_question}'. "
+        f"Topic anchor: '{run.topic}'. Hook type: {context.hook_type}. Visual type: {context.visual_type}. Tone: {context.tone}. "
+        f"CTA: {context.call_to_action}. Requested duration: {requested_duration_seconds or effective_duration_seconds}s. "
+        f"Effective duration for this provider: {effective_duration_seconds}s. Text density: {context.text_density or 'medium'}. "
+        f"Campaign description: {context.campaign_description or 'None supplied'}. "
+        f"Campaign content rules: {content_rules}. "
+        f"Tracking code for metadata only: {context.tracking_code}. "
+        f"{hook_type_guidance(context.hook_type, context.experiment_config)} "
+        f"{visual_type_guidance(context.visual_type)} "
+        f"{tone_guidance(context.tone)} "
+        f"{text_density_guidance(context.text_density)} "
+        f"Keep the central question fixed, vary the presentation, keep it suitable for 9:16 short-form video, and make clear the payment is voluntary participation in a transparent social experiment. "
+        f"{CAMPAIGN_PROHIBITED_CLAIMS} Do not display the tracking code in viewer-facing copy. Avoid manipulative pressure, threats, guilt, or false urgency."
+    )
+
+
+def build_campaign_idea_fields(context: CampaignGenerationContext) -> tuple[str, str, str]:
+    title = f"{context.core_question} | {context.hook_type.replace('_', ' ')} {context.visual_type.replace('_', ' ')}"
+    hook_templates = {
+        "direct_question": context.core_question,
+        "challenge": f"Most people scroll past this question. Would you give a stranger £1?",
+        "statistic": "What percentage of people would voluntarily send £1 to a stranger if asked honestly?",
+        "humour": "The internet gets weird fast, so we asked one tiny transparent question.",
+        "social_proof": "We are testing whether honest participation spreads without hype or fake numbers.",
+        "philosophical": "A tiny question about trust, generosity, and how strangers behave online.",
+    }
+    hook = hook_templates.get(context.hook_type, context.core_question)
+    concept = (
+        f"A {context.tone} short-form social-experiment setup asking '{context.core_question}' with "
+        f"{context.visual_type.replace('_', ' ')} visuals and a transparent CTA: {context.call_to_action}."
+    )
+    return title, hook, concept
+
+
+def build_campaign_script_scenes(
+    context: CampaignGenerationContext,
+    effective_duration_seconds: int,
+) -> list[dict[str, str]]:
+    timings = build_scene_timings(effective_duration_seconds) if effective_duration_seconds > 10 else ["0-2s", "2-6s", "6-8s", f"8-{effective_duration_seconds}s"]
+    question_line = context.core_question
+    disclosure_line = CAMPAIGN_DISCLOSURE_LINE
+    explanation_line = "We are measuring how many people voluntarily join a transparent internet social experiment."
+    cta_line = f"{context.call_to_action} {'Link in bio.' if context.landing_page_url else ''}".strip()
+
+    density = context.text_density or "medium"
+    if density == "low":
+        overlays = [question_line, "", disclosure_line, cta_line]
+    elif density == "high":
+        overlays = [question_line, "Voluntary participation. Transparent experiment.", disclosure_line, cta_line]
+    else:
+        overlays = [question_line, explanation_line, disclosure_line, cta_line]
+
+    dialogue = ["", "", "", ""] if not context.voiceover_enabled else [
+        question_line,
+        explanation_line,
+        disclosure_line,
+        cta_line,
+    ]
+    visual_beats = [
+        f"{visual_type_guidance(context.visual_type)} Open with '{context.core_question}' as the core frame.",
+        f"Show a clean explanation beat around whether a stranger would voluntarily send £1 in this transparent experiment.",
+        f"Reinforce that giving a stranger £1 is voluntary and does not buy a product or support a charity.",
+        f"End on a clear CTA beat that returns to the question '{context.core_question}'.",
+    ]
+    purposes = ["hook", "explanation", "disclosure", "cta"]
+    return [
+        {
+            "time": timings[index],
+            "purpose": purposes[index],
+            "subject": f"the campaign question '{context.core_question}'",
+            "setting": f"9:16 {context.visual_type.replace('_', ' ')} visual world",
+            "visible_action": visual_beats[index],
+            "state_before": f"the viewer has not yet understood why a stranger is being asked for £1",
+            "state_after": "the viewer understands the experiment clearly" if index < 3 else "the CTA is unmistakable",
+            "camera_direction": "keep the frame vertical, readable, and paced for short-form video",
+            "forbidden_actions": "no fabricated donors, no fake payments, no fake testimonials, no real-broadcaster impersonation",
+            "visual": visual_beats[index],
+            "dialogue": dialogue[index],
+            "on_screen_text": overlays[index],
+            "motion_camera": "bold readable motion with clear negative space for overlays",
+        }
+        for index in range(4)
+    ]
+
+
+def build_campaign_storyboard_prompt(context: CampaignGenerationContext, effective_duration_seconds: int) -> str:
+    return (
+        f"Create a 9:16 storyboard for '{context.core_question}' using {context.visual_type} visuals, a {context.tone} tone, "
+        f"{effective_duration_seconds}s pacing, and {context.text_density or 'medium'} text density. "
+        f"Keep the question prominent, make the disclosure clear, end with the CTA '{context.call_to_action}', "
+        f"use 'link in bio' instead of raw URLs when a landing page exists, and ensure the sequence works without voiceover when needed."
+    )
+
+
+def build_campaign_video_prompt(
+    context: CampaignGenerationContext,
+    *,
+    provider_name: str,
+    effective_duration_seconds: int,
+    end_tag: str,
+) -> str:
+    base_prompt = (
+        f"Create a 9:16 short-form video built around the question '{context.core_question}'. "
+        f"Visual style: {context.visual_type}. Tone: {context.tone}. "
+        f"Shot composition: readable vertical framing with strong opening composition, clean mid-shot explanation beats, and a clear final CTA frame. "
+        f"Pacing: {effective_duration_seconds}s total with immediate hook, fast explanation, disclosure, and CTA close. "
+        f"Text-overlay requirements: {text_density_guidance(context.text_density)} Reserve clean negative space for overlays. "
+        f"Disclosure requirements: state that this is a transparent social experiment, not a product or charity. "
+        f"CTA: {context.call_to_action}. "
+        f"Visual safety restrictions: {visual_type_guidance(context.visual_type)} {tone_guidance(context.tone)} "
+        f"Prohibited claims: {CAMPAIGN_PROHIBITED_CLAIMS}"
+    )
+    if provider_name == "runway":
+        visual_body = sanitize_runway_visual_phrase(base_prompt, context.core_question)
+        return build_runway_visual_only_prompt_from_text(visual_body, force_target=True)
+    return compact_prompt_text(f"{base_prompt} End tag: {end_tag}", provider_name, force_target=True)
+
+
+def build_campaign_caption(
+    context: CampaignGenerationContext,
+    run_config: dict[str, Any],
+    *,
+    platform: str | None = None,
+) -> str:
+    question = context.core_question
+    participation_line = "This is a transparent social experiment measuring how many people voluntarily participate simply because they were asked."
+    closing = context.call_to_action
+    link_hint = "Link in bio." if context.landing_page_url else ""
+    parts = [question, participation_line, CAMPAIGN_DISCLOSURE_LINE, closing, link_hint]
+    caption = " ".join(part for part in parts if part).strip()
+    if platform == "tiktok":
+        return f"{caption} {CAMPAIGN_SAFE_HASHTAGS['tiktok']}".strip()
+    return caption
+
+
 def create_pipeline_run(db: Session, payload: PipelineRunCreate) -> PipelineRun:
     account = get_default_account(db)
-    input_config = build_run_input_config(account.account_config_json or {}, payload)
     campaign, creative_variant = resolve_pipeline_campaign_context(db, payload.campaign_id, payload.creative_variant_id)
+    context = None
+    if campaign is not None and creative_variant is not None:
+        context = CampaignGenerationContext(
+            campaign_id=campaign.id,
+            campaign_name=campaign.name,
+            campaign_slug=campaign.slug,
+            core_question=campaign.core_question,
+            campaign_description=campaign.description,
+            landing_page_url=campaign.landing_page_url,
+            currency=campaign.currency,
+            target_amount_minor=campaign.target_amount_minor,
+            target_reach=campaign.target_reach,
+            content_rules=dict(campaign.content_rules_json or {}),
+            target_platforms=list(campaign.target_platforms_json or []),
+            creative_variant_id=creative_variant.id,
+            tracking_code=creative_variant.tracking_code,
+            hook_type=creative_variant.hook_type,
+            visual_type=creative_variant.visual_type,
+            tone=creative_variant.tone,
+            call_to_action=creative_variant.call_to_action,
+            video_length_seconds=creative_variant.video_length_seconds,
+            voiceover_enabled=creative_variant.voiceover_enabled,
+            text_density=creative_variant.text_density,
+            experiment_config=dict(creative_variant.experiment_config_json or {}),
+        )
+    input_config = apply_campaign_defaults_to_run_config(build_run_input_config(account.account_config_json or {}, payload), payload, context)
     run = PipelineRun(
         account_id=account.id,
         campaign_id=campaign.id if campaign else None,
@@ -1059,29 +1394,41 @@ def generate_idea(db: Session, run: PipelineRun):
     llm = get_llm_provider()
     account = db.get(Account, run.account_id)
     run_config = get_run_input_config(run, account.account_config_json if account else {})
+    campaign_context = get_run_campaign_context(db, run)
+    requested_duration, effective_duration = get_effective_run_duration_seconds(run, run_config, get_settings().video_provider, campaign_context)
     prompt = (
-        f"Turn topic '{run.topic}' into a {run_config['content_format']} video idea for {run_config['audience_level']} developers. "
-        f"Keep the tone {run_config['caption_tone']} and aligned with {run_config['brand_description']}"
+        build_campaign_idea_prompt(run, run_config, campaign_context, requested_duration_seconds=requested_duration, effective_duration_seconds=effective_duration)
+        if campaign_context
+        else (
+            f"Turn topic '{run.topic}' into a {run_config['content_format']} video idea for {run_config['audience_level']} developers. "
+            f"Keep the tone {run_config['caption_tone']} and aligned with {run_config['brand_description']}"
+        )
     )
     result = llm.generate(PipelineStage.IDEA_GENERATION.value, prompt, {"topic": run.topic, "config": run_config})
-    title_suffix = {
-        "coding metaphor": "as a nightclub bouncer",
-        "bug explanation": "as a bug hunt",
-        "interview-style tip": "as a hiring manager tip",
-        "quick concept explainer": "in one clean visual explainer",
-    }.get(run_config["content_format"], "as a coding mini-story")
-    hook_suffix = {
-        "coding metaphor": "is just a bouncer with trust issues.",
-        "bug explanation": "breaks because one sneaky bug keeps bending the rules.",
-        "interview-style tip": "gets way easier when you answer it like this in an interview.",
-        "quick concept explainer": "finally clicks when you see it in one short scene.",
-    }.get(run_config["content_format"], "works better when the story is visual.")
+    if campaign_context:
+        title, hook, concept = build_campaign_idea_fields(campaign_context)
+    else:
+        title_suffix = {
+            "coding metaphor": "as a nightclub bouncer",
+            "bug explanation": "as a bug hunt",
+            "interview-style tip": "as a hiring manager tip",
+            "quick concept explainer": "in one clean visual explainer",
+        }.get(run_config["content_format"], "as a coding mini-story")
+        hook_suffix = {
+            "coding metaphor": "is just a bouncer with trust issues.",
+            "bug explanation": "breaks because one sneaky bug keeps bending the rules.",
+            "interview-style tip": "gets way easier when you answer it like this in an interview.",
+            "quick concept explainer": "finally clicks when you see it in one short scene.",
+        }.get(run_config["content_format"], "works better when the story is visual.")
+        title = f"{run.topic} {title_suffix}"
+        hook = f"{run.topic} {hook_suffix}"
+        concept = f"The story explains {run.topic} with a {run_config['content_format']} for {run_config['audience_level']} developers."
     idea = ContentIdea(
         pipeline_run_id=run.id,
         topic=run.topic,
-        title=f"{run.topic} {title_suffix}",
-        hook=f"{run.topic} {hook_suffix}",
-        concept=f"The story explains {run.topic} with a {run_config['content_format']} for {run_config['audience_level']} developers.",
+        title=title,
+        hook=hook,
+        concept=concept,
         format=run_config["content_format"],
         difficulty=run_config["audience_level"],
     )
@@ -1110,10 +1457,26 @@ def generate_script(db: Session, run: PipelineRun):
     account = db.get(Account, run.account_id)
     provider_name = get_settings().video_provider
     run_config = get_run_input_config(run, account.account_config_json if account else {})
-    target_duration = get_target_duration_seconds(run_config, provider_name)
-    prompt = f"Write a short {run_config['content_format']} script for '{idea.title}' aimed at {run_config['audience_level']} viewers."
+    campaign_context = get_run_campaign_context(db, run)
+    requested_duration, target_duration = get_effective_run_duration_seconds(run, run_config, provider_name, campaign_context)
+    prompt = (
+        f"Write a short campaign script for '{campaign_context.core_question}' with hook type {campaign_context.hook_type}, "
+        f"visual type {campaign_context.visual_type}, tone {campaign_context.tone}, CTA '{campaign_context.call_to_action}', "
+        f"requested duration {requested_duration or target_duration}s, effective duration {target_duration}s, "
+        f"text density {campaign_context.text_density or 'medium'}, and transparent disclosure. "
+        f"{hook_type_guidance(campaign_context.hook_type, campaign_context.experiment_config)} "
+        f"{tone_guidance(campaign_context.tone)} "
+        f"{text_density_guidance(campaign_context.text_density)} "
+        f"{CAMPAIGN_PROHIBITED_CLAIMS}"
+        if campaign_context
+        else f"Write a short {run_config['content_format']} script for '{idea.title}' aimed at {run_config['audience_level']} viewers."
+    )
     result = llm.generate(PipelineStage.SCRIPT_GENERATION.value, prompt, {"idea_id": idea.id, "config": run_config})
-    scenes = build_scene_templates(run.topic, run.style_preset, target_duration, run_config["audience_level"])
+    scenes = (
+        build_campaign_script_scenes(campaign_context, target_duration)
+        if campaign_context
+        else build_scene_templates(run.topic, run.style_preset, target_duration, run_config["audience_level"])
+    )
     adherence_contract = build_story_adherence_contract(run.topic, run_config["audience_level"], target_duration)
     script_json = {
         "hook": idea.hook,
@@ -1121,9 +1484,16 @@ def generate_script(db: Session, run: PipelineRun):
         "story_adherence_contract": adherence_contract,
         "final_tag": build_account_config(account.account_config_json if account else {}).get("end_tag", "Made by CodeToons AI"),
         "target_duration_seconds": target_duration,
+        "requested_duration_seconds": requested_duration,
         "audience_level": run_config["audience_level"],
         "content_format": run_config["content_format"],
     }
+    if campaign_context:
+        script_json["campaign_generation"] = build_campaign_generation_metadata(
+            campaign_context,
+            requested_duration_seconds=requested_duration,
+            effective_duration_seconds=target_duration,
+        )
     script = Script(pipeline_run_id=run.id, hook=idea.hook, script_json=script_json, duration_seconds=target_duration)
     db.add(script)
     db.flush()
@@ -1149,7 +1519,13 @@ def generate_storyboard(db: Session, run: PipelineRun):
     script = db.get(Script, run.script_id)
     account = db.get(Account, run.account_id)
     run_config = get_run_input_config(run, account.account_config_json if account else {})
-    prompt = f"Create storyboard frames from the script in the {run.style_preset} preset."
+    campaign_context = get_run_campaign_context(db, run)
+    requested_duration, effective_duration = get_effective_run_duration_seconds(run, run_config, get_settings().video_provider, campaign_context)
+    prompt = (
+        build_campaign_storyboard_prompt(campaign_context, effective_duration)
+        if campaign_context
+        else f"Create storyboard frames from the script in the {run.style_preset} preset."
+    )
     result = llm.generate(PipelineStage.STORYBOARD_GENERATION.value, prompt, {"script": script.script_json, "config": run_config})
     scenes = get_script_scenes(script)
     adherence_contract = build_story_adherence_contract(run.topic, run_config["audience_level"], script.duration_seconds if script else 10)
@@ -1173,6 +1549,13 @@ def generate_storyboard(db: Session, run: PipelineRun):
             for index, scene in enumerate(scenes[:4])
         ]
     }
+    if campaign_context:
+        frames["campaign_generation"] = build_campaign_generation_metadata(
+            campaign_context,
+            requested_duration_seconds=requested_duration,
+            effective_duration_seconds=effective_duration,
+        )
+        frames["campaign_context_summary"] = campaign_context_summary(campaign_context, effective_duration)
     storyboard = Storyboard(pipeline_run_id=run.id, frames_json=frames)
     db.add(storyboard)
     db.flush()
@@ -1257,6 +1640,7 @@ def build_video_prompt(run: PipelineRun, db: Session) -> str:
     idea = db.get(ContentIdea, run.idea_id) if run.idea_id else None
     account = db.get(Account, run.account_id)
     run_config = get_run_input_config(run, account.account_config_json if account else {})
+    campaign_context = get_run_campaign_context(db, run)
     preset = get_style_preset(run, account.account_config_json if account else {})
     end_tag = build_account_config(account.account_config_json if account else {}).get("end_tag", "Made by CodeToons AI")
     scenes = get_script_scenes(script)
@@ -1266,7 +1650,7 @@ def build_video_prompt(run: PipelineRun, db: Session) -> str:
                 return compact_prompt_text(run.prompt_override, provider_name)
             return build_runway_visual_only_prompt(run, idea, preset, scenes, base_prompt=run.prompt_override)
         return run.prompt_override
-    return build_prompt_from_scenes(run, idea, run_config, preset, scenes, end_tag, provider_name)
+    return build_prompt_from_scenes(run, idea, run_config, preset, scenes, end_tag, provider_name, campaign_context)
 
 
 def enqueue_resume_pipeline_task(run_id: str, countdown: int | None = None) -> None:
@@ -1283,8 +1667,9 @@ def create_video_placeholder(db: Session, run: PipelineRun) -> Video:
     provider = get_video_provider()
     account = db.get(Account, run.account_id)
     run_config = get_run_input_config(run, account.account_config_json if account else {})
+    campaign_context = get_run_campaign_context(db, run)
     prompt = build_video_prompt(run, db)
-    target_duration = get_target_duration_seconds(run_config, provider.name)
+    requested_duration, target_duration = get_effective_run_duration_seconds(run, run_config, provider.name, campaign_context)
     video = db.get(Video, run.video_id) if run.video_id else None
     prior_stage = run.current_stage
 
@@ -1300,6 +1685,11 @@ def create_video_placeholder(db: Session, run: PipelineRun) -> Video:
             idempotency_key=f"video:{run.id}",
             requested_duration_seconds=target_duration,
             duration_seconds=target_duration,
+            provider_response_json=(
+                {"campaign_generation": build_campaign_generation_metadata(campaign_context, requested_duration_seconds=requested_duration, effective_duration_seconds=target_duration)}
+                if campaign_context
+                else {}
+            ),
         )
         db.add(video)
         db.flush()
@@ -1312,6 +1702,17 @@ def create_video_placeholder(db: Session, run: PipelineRun) -> Video:
         video.poll_interval_seconds = settings.default_poll_interval_seconds
         video.requested_duration_seconds = target_duration
         video.duration_seconds = target_duration
+        if campaign_context:
+            video.provider_response_json = sanitize_for_json(
+                {
+                    **(video.provider_response_json or {}),
+                    "campaign_generation": build_campaign_generation_metadata(
+                        campaign_context,
+                        requested_duration_seconds=requested_duration,
+                        effective_duration_seconds=target_duration,
+                    ),
+                }
+            )
 
     run.video_id = video.id
     run.current_stage = PipelineStage.VIDEO_GENERATION_SUBMIT
@@ -1670,27 +2071,44 @@ def create_manual_post_package(db: Session, run: PipelineRun):
         return ensure_manual_package_final_asset_defaults(db, run, existing)
     account = db.get(Account, run.account_id)
     run_config = get_run_input_config(run, account.account_config_json if account else {})
+    campaign_context = get_run_campaign_context(db, run)
     emoji_prefix = {
         "none": "",
         "minimal": "🎬 ",
         "medium": "🎬✨ ",
     }.get(run_config["emoji_preference"], "")
     hashtags = list(run_config["hashtag_set"])
-    target_platforms = list(run_config["target_platforms"])
-    caption = run.caption_override or (
-        f"{emoji_prefix}{run.topic} explained with a {run_config['content_format']} for {run_config['audience_level']} developers. "
-        f"Tone: {run_config['caption_tone']}. {run_config['preferred_cta']}"
-    ).strip()
-    alternative_captions = [
-        f"{emoji_prefix}{run.topic} feels easier when the story stays {run_config['caption_tone']} and visual. {run_config['preferred_cta']}".strip(),
-        f"{emoji_prefix}A fast {run_config['content_format']} for {run.topic}. Keep this if you teach {run_config['audience_level']} coders.".strip(),
-        f"{emoji_prefix}Save this for a cleaner mental model of {run.topic}. {run_config['preferred_cta']}".strip(),
-    ]
-    alternative_hooks = [
-        f"{run.topic} made simple for {run_config['audience_level']} developers.",
-        f"A {run_config['content_format']} is the fastest way to remember {run.topic}.",
-        f"{run.topic} clicks faster when the story stays visual.",
-    ]
+    target_platforms = list(campaign_context.target_platforms if campaign_context and campaign_context.target_platforms else run_config["target_platforms"])
+    if campaign_context:
+        hashtags = list(dict.fromkeys([*hashtags, *CAMPAIGN_BASELINE_HASHTAGS, *[CAMPAIGN_SAFE_HASHTAGS.get(platform, "") for platform in target_platforms if CAMPAIGN_SAFE_HASHTAGS.get(platform)]]))
+        hashtags = [tag for tag in hashtags if tag]
+        caption = run.caption_override or build_campaign_caption(campaign_context, run_config)
+        tiktok_caption = f"{caption} {CAMPAIGN_SAFE_HASHTAGS['tiktok']}".strip() if run.caption_override else build_campaign_caption(campaign_context, run_config, platform="tiktok")
+        alternative_captions = [
+            caption,
+            tiktok_caption,
+            f"{campaign_context.core_question} {CAMPAIGN_DISCLOSURE_LINE} {campaign_context.call_to_action}".strip(),
+        ]
+        alternative_hooks = [
+            campaign_context.core_question,
+            "A transparent internet experiment about whether strangers voluntarily participate.",
+            f"{campaign_context.core_question} {campaign_context.call_to_action}".strip(),
+        ]
+    else:
+        caption = run.caption_override or (
+            f"{emoji_prefix}{run.topic} explained with a {run_config['content_format']} for {run_config['audience_level']} developers. "
+            f"Tone: {run_config['caption_tone']}. {run_config['preferred_cta']}"
+        ).strip()
+        alternative_captions = [
+            f"{emoji_prefix}{run.topic} feels easier when the story stays {run_config['caption_tone']} and visual. {run_config['preferred_cta']}".strip(),
+            f"{emoji_prefix}A fast {run_config['content_format']} for {run.topic}. Keep this if you teach {run_config['audience_level']} coders.".strip(),
+            f"{emoji_prefix}Save this for a cleaner mental model of {run.topic}. {run_config['preferred_cta']}".strip(),
+        ]
+        alternative_hooks = [
+            f"{run.topic} made simple for {run_config['audience_level']} developers.",
+            f"A {run_config['content_format']} is the fastest way to remember {run.topic}.",
+            f"{run.topic} clicks faster when the story stays visual.",
+        ]
     is_runway_video = bool(video and video.provider == "runway")
     source_asset = get_source_video_asset(db, run)
     pkg = ManualPostPackage(
@@ -1706,10 +2124,19 @@ def create_manual_post_package(db: Session, run: PipelineRun):
         ],
         platform_variants_json={
             "instagram": {"caption": caption, "hashtags": hashtags},
-            "tiktok": {"caption": f"{caption} #learnontiktok".strip(), "hashtags": hashtags},
+            "tiktok": {"caption": tiktok_caption if campaign_context else f"{caption} #learnontiktok".strip(), "hashtags": hashtags},
             "youtube": {"title": alternative_hooks[2], "description": caption, "hashtags": hashtags},
             "alternative_captions": alternative_captions,
             "alternative_hooks": alternative_hooks,
+            "campaign_generation": (
+                build_campaign_generation_metadata(
+                    campaign_context,
+                    requested_duration_seconds=campaign_context.video_length_seconds if campaign_context else None,
+                    effective_duration_seconds=video.duration_seconds if video and video.duration_seconds else get_target_duration_seconds(run_config, get_settings().video_provider),
+                )
+                if campaign_context
+                else None
+            ),
         },
         status=ManualPackageStatus.READY,
         final_asset_id=source_asset.id if source_asset else None,
@@ -1724,6 +2151,15 @@ def create_manual_post_package(db: Session, run: PipelineRun):
             "narration_render_status": None,
             "caption_version": None,
             "render_version": None,
+            "campaign_generation": (
+                build_campaign_generation_metadata(
+                    campaign_context,
+                    requested_duration_seconds=campaign_context.video_length_seconds if campaign_context else None,
+                    effective_duration_seconds=video.duration_seconds if video and video.duration_seconds else get_target_duration_seconds(run_config, get_settings().video_provider),
+                )
+                if campaign_context
+                else None
+            ),
         },
     )
     db.add(pkg)
@@ -2210,6 +2646,7 @@ def get_pipeline_run_detail(db: Session, run_id: str) -> dict[str, Any]:
     preflight = build_preflight_review(db, run) if run.script_id else None
     story_adherence_review = build_story_adherence_review(db, run)
     narration_payloads = build_narration_payloads(db, run)
+    campaign_context = get_run_campaign_context(db, run)
     manual_package = db.get(ManualPostPackage, run.manual_post_package_id) if run.manual_post_package_id else None
     if manual_package:
         manual_package = ensure_manual_package_final_asset_defaults(db, run, manual_package)
@@ -2238,6 +2675,23 @@ def get_pipeline_run_detail(db: Session, run_id: str) -> dict[str, Any]:
         "performance_learnings_summary": build_performance_learnings_summary(db, run.id),
         "review_sections": review_sections,
         "review_preflight": preflight,
+        "campaign_context": campaign_context_summary(
+            campaign_context,
+            effective_duration_seconds=(
+                (serialize_model(script) or {}).get("duration_seconds")
+                if script
+                else (
+                    get_effective_run_duration_seconds(
+                        run,
+                        get_run_input_config(run),
+                        get_settings().video_provider,
+                        campaign_context,
+                    )[1]
+                    if campaign_context
+                    else None
+                )
+            ),
+        ) if campaign_context else None,
     }
 
 
