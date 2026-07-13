@@ -3,12 +3,99 @@ export type PipelineRunSummary = {
   topic: string;
   status: string;
   current_stage: string;
+  campaign_id?: string | null;
+  creative_variant_id?: string | null;
   provider?: string | null;
   video_status?: string | null;
   provider_job_id?: string | null;
   error_message?: string | null;
   review_notes?: string | null;
   created_at: string;
+};
+
+export type PipelineRunCreatePayload = {
+  topic: string;
+  auto_mode?: boolean;
+  campaign_id?: string | null;
+  creative_variant_id?: string | null;
+  style_preset?: string | null;
+  target_platforms?: string[] | null;
+  caption_tone?: string | null;
+  duration_preference_seconds?: number | null;
+  audience_level?: string | null;
+  content_format?: string | null;
+  priority?: string;
+};
+
+export type CampaignStatus = "draft" | "active" | "paused" | "completed";
+
+export type Campaign = {
+  id: string;
+  name: string;
+  slug: string;
+  core_question: string;
+  description?: string | null;
+  landing_page_url?: string | null;
+  currency: string;
+  target_amount_minor: number;
+  target_reach: number;
+  status: CampaignStatus;
+  content_rules_json: Record<string, unknown>;
+  target_platforms_json: string[];
+  start_date?: string | null;
+  end_date?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CampaignCreatePayload = {
+  name: string;
+  slug: string;
+  core_question: string;
+  description?: string | null;
+  landing_page_url?: string | null;
+  currency: string;
+  target_amount_minor: number;
+  target_reach: number;
+  status: CampaignStatus;
+  target_platforms_json: string[];
+  content_rules_json?: Record<string, unknown>;
+  start_date?: string | null;
+  end_date?: string | null;
+};
+
+export type CampaignUpdatePayload = Partial<CampaignCreatePayload>;
+
+export type CampaignListResponse = {
+  items: Campaign[];
+};
+
+export type CreativeVariant = {
+  id: string;
+  campaign_id: string;
+  hook_type: string;
+  visual_type: string;
+  tone: string;
+  call_to_action: string;
+  video_length_seconds?: number | null;
+  voiceover_enabled: boolean;
+  text_density?: string | null;
+  tracking_code: string;
+  experiment_config_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreativeVariantCreatePayload = {
+  hook_type: string;
+  visual_type: string;
+  tone: string;
+  call_to_action: string;
+  video_length_seconds?: number | null;
+  voiceover_enabled: boolean;
+  text_density?: string | null;
+  tracking_code: string;
+  experiment_config_json?: Record<string, unknown>;
 };
 
 export type AccountDefaults = {
@@ -596,11 +683,30 @@ export const api = {
       body: JSON.stringify(payload)
     }),
   listRuns: () => request<PipelineRunSummary[]>("/pipeline-runs"),
-  createRun: (payload: Record<string, unknown>) =>
+  createRun: (payload: PipelineRunCreatePayload) =>
     request<PipelineRunDetail>("/pipeline-runs", {
       method: "POST",
       body: JSON.stringify(payload)
     }),
+  createCampaign: (payload: CampaignCreatePayload) =>
+    request<Campaign>("/campaigns", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  listCampaigns: () => request<CampaignListResponse>("/campaigns"),
+  getCampaign: (campaignId: string) => request<Campaign>(`/campaigns/${campaignId}`),
+  updateCampaign: (campaignId: string, payload: CampaignUpdatePayload) =>
+    request<Campaign>(`/campaigns/${campaignId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
+  createCreativeVariant: (campaignId: string, payload: CreativeVariantCreatePayload) =>
+    request<CreativeVariant>(`/campaigns/${campaignId}/variants`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  listCreativeVariants: (campaignId: string) =>
+    request<CreativeVariant[]>(`/campaigns/${campaignId}/variants`),
   getRun: (runId: string) => request<PipelineRunDetail>(`/pipeline-runs/${runId}`),
   resumeRun: (runId: string, reviewNotes = "", confirmPaidGeneration = false) =>
     request<PipelineRunDetail>(`/pipeline-runs/${runId}/resume`, {

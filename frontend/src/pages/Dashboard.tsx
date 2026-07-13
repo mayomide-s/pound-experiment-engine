@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { api, AccountDefaults, HealthDetails, PipelineRunDetail, PipelineRunSummary } from "../api/client";
 import { EventTimeline } from "../components/EventTimeline";
@@ -93,6 +93,8 @@ function matchesTopicSearch(run: PipelineRunSummary, topicSearch: string) {
 }
 
 export function DashboardPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedRunId = searchParams.get("run");
   const [handoffCapture] = useState(() => readDashboardPrefillCapture());
   const handoffPrefill = handoffCapture.prefill;
   const handoffProtectedFields = useMemo(
@@ -212,7 +214,9 @@ export function DashboardPage() {
   async function loadRuns() {
     const data = await api.listRuns();
     setRuns(data);
-    if (!selectedRunId && data.length > 0) {
+    if (requestedRunId && data.some((run) => run.id === requestedRunId)) {
+      setSelectedRunId(requestedRunId);
+    } else if (!selectedRunId && data.length > 0) {
       setSelectedRunId(data[0].id);
     }
     await loadFeaturedDemo(data);
@@ -291,6 +295,18 @@ export function DashboardPage() {
     }
     setPaidRunwayConfirmed(false);
   }, [selectedRunId]);
+
+  useEffect(() => {
+    if (!requestedRunId || !runs.some((run) => run.id === requestedRunId)) {
+      return;
+    }
+    setSelectedRunId(requestedRunId);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete("run");
+      return next;
+    }, { replace: true });
+  }, [requestedRunId, runs, setSearchParams]);
 
   const sortedRuns = useMemo(() => {
     return [...runs].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime());

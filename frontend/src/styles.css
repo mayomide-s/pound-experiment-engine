@@ -709,6 +709,11 @@ pre {
   background: #FEF2F2;
 }
 
+.success-tone {
+  border-color: #BBF7D0;
+  background: #F0FDF4;
+}
+
 .quality-item {
   grid-template-columns: 1fr auto;
   align-items: center;
@@ -862,6 +867,41 @@ pre {
 
 .create-run-panel .toggle-chip {
   padding: 0.45rem 0.65rem;
+}
+
+.campaigns-grid {
+  grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
+}
+
+.campaign-list-button {
+  border: 1px solid #DDE5F0;
+  border-radius: 12px;
+  background: #FFFFFF;
+  padding: 0.85rem;
+  text-align: left;
+}
+
+.campaign-list-button:hover:not(:disabled) {
+  background: #FFFFFF;
+  border-color: #93C5FD;
+  box-shadow: 0 8px 22px rgba(37, 99, 235, 0.08);
+}
+
+.campaign-list-button-active {
+  border-color: #2563EB;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.campaign-summary-grid {
+  margin-top: 0.5rem;
+}
+
+.variant-card p {
+  margin: 0.2rem 0 0;
+}
+
+.variant-run-panel summary {
+  color: #2563EB;
 }
 
 .app-shell.sidebar-collapsed .sidebar {

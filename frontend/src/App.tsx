@@ -12,6 +12,7 @@ import { IdeasPage } from "./pages/Ideas";
 import { SettingsPage } from "./pages/Settings";
 import { VideoReviewPage } from "./pages/VideoReview";
 import { PerformancePage } from "./pages/Performance";
+import { CampaignsPage } from "./pages/Campaigns";
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "story-engine-sidebar-collapsed";
 
@@ -195,6 +196,10 @@ export default function App() {
               <span className="nav-icon">V</span>
               <span className="nav-label">Video Review</span>
             </NavLink>
+            <NavLink to="/campaigns" title="Campaigns">
+              <span className="nav-icon">M</span>
+              <span className="nav-label">Campaigns</span>
+            </NavLink>
           </nav>
         </div>
         <div className="sidebar-footer">
@@ -223,6 +228,7 @@ export default function App() {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/ideas" element={<IdeasPage />} />
           <Route path="/review" element={<VideoReviewPage />} />
+          <Route path="/campaigns" element={<CampaignsPage />} />
           <Route path="/performance/:runId" element={<PerformancePage />} />
         </Routes>
       </main>
