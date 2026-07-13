@@ -165,7 +165,19 @@ def _get_object_value(source: Any, key: str, default: Any = None) -> Any:
 
 def _get_metadata(source: Any) -> dict[str, Any]:
     metadata = _get_object_value(source, "metadata", {}) or {}
-    return dict(metadata)
+    if isinstance(metadata, dict):
+        return metadata
+    to_dict_recursive = getattr(metadata, "to_dict_recursive", None)
+    if callable(to_dict_recursive):
+        converted = to_dict_recursive()
+        if isinstance(converted, dict):
+            return converted
+    to_dict = getattr(metadata, "to_dict", None)
+    if callable(to_dict):
+        converted = to_dict()
+        if isinstance(converted, dict):
+            return converted
+    return {}
 
 
 def get_checkout_session_record(db: Session, checkout_session_id: str) -> CheckoutSessionRecord:
@@ -236,11 +248,13 @@ def _ensure_checkout_session_matches_campaign(record: CheckoutSessionRecord, cam
         raise CheckoutSessionVerificationError("Stripe Checkout Session mode mismatch.")
     if campaign is None:
         raise CheckoutSessionVerificationError("Checkout session campaign record is missing.")
+    expected_campaign_id = str(campaign.id or "")
+    expected_campaign_slug = str(campaign.slug or "")
     if session_amount_total != campaign.target_amount_minor:
         raise CheckoutSessionVerificationError("Stripe Checkout Session amount mismatch.")
     if session_currency != campaign.currency.upper():
         raise CheckoutSessionVerificationError("Stripe Checkout Session currency mismatch.")
-    if session_campaign_id != campaign.id or session_campaign_slug != campaign.slug:
+    if session_campaign_id != expected_campaign_id or session_campaign_slug != expected_campaign_slug:
         raise CheckoutSessionVerificationError("Stripe Checkout Session campaign metadata mismatch.")
     if session_experiment_type != EXPERIMENT_TYPE:
         raise CheckoutSessionVerificationError("Stripe Checkout Session experiment metadata mismatch.")
