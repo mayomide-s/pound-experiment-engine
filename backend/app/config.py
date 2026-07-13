@@ -1,8 +1,8 @@
 from functools import lru_cache
-from urllib.parse import urlparse
 from typing import Literal
+from urllib.parse import urlparse
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,7 +10,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 
     app_name: str = "AI Coding Story Engine"
-    environment: str = "development"
+    environment: str = Field(default="development", alias="ENVIRONMENT")
+    app_env: str | None = Field(default=None, alias="APP_ENV", exclude=True)
     api_prefix: str = "/api"
     auth_enabled: bool = Field(default=False, alias="AUTH_ENABLED")
     app_access_password: str = Field(default="", alias="APP_ACCESS_PASSWORD")
@@ -27,7 +28,7 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str = Field(default="", alias="STRIPE_WEBHOOK_SECRET")
 
     database_url: str = Field(default="sqlite:///./socipost.db", alias="DATABASE_URL")
-    redis_url: str = Field(default="redis://redis:6379/0", alias="REDIS_URL")
+    redis_url: str = Field(default="", alias="REDIS_URL")
 
     r2_account_id: str = Field(default="", alias="R2_ACCOUNT_ID")
     r2_access_key_id: str = Field(default="", alias="R2_ACCESS_KEY_ID")
@@ -76,6 +77,12 @@ class Settings(BaseSettings):
     default_max_poll_attempts: int = 20
     default_provider_timeout_minutes: int = 30
 
+    @model_validator(mode="after")
+    def _prefer_app_env_over_environment(self):
+        if self.app_env:
+            self.environment = self.app_env
+        return self
+
     def active_mode_label(self) -> str:
         return f"{self.video_provider}/{self.storage_provider}"
 
@@ -90,6 +97,15 @@ class Settings(BaseSettings):
 
     def normalized_public_site_base_url(self) -> str:
         return self.public_site_base_url.rstrip("/")
+
+    def normalized_database_url(self) -> str:
+        if self.database_url.startswith("postgresql+psycopg://"):
+            return self.database_url
+        if self.database_url.startswith("postgres://"):
+            return self.database_url.replace("postgres://", "postgresql+psycopg://", 1)
+        if self.database_url.startswith("postgresql://"):
+            return self.database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+        return self.database_url
 
     def is_development_like_environment(self) -> bool:
         return self.environment.lower() in {"development", "dev", "local", "test", "testing"}
@@ -194,7 +210,7 @@ class Settings(BaseSettings):
 
     def missing_configuration(self) -> dict[str, list[str]]:
         required = {
-            "base": ["DATABASE_URL", "REDIS_URL", "VIDEO_PROVIDER", "STORAGE_PROVIDER"],
+            "base": ["DATABASE_URL", "VIDEO_PROVIDER", "STORAGE_PROVIDER"],
             "auth": [],
             "storage": [],
             "video": [],
@@ -230,7 +246,6 @@ class Settings(BaseSettings):
 
         values = {
             "DATABASE_URL": self.database_url,
-            "REDIS_URL": self.redis_url,
             "VIDEO_PROVIDER": self.video_provider,
             "STORAGE_PROVIDER": self.storage_provider,
             "APP_ACCESS_PASSWORD": self.app_access_password,

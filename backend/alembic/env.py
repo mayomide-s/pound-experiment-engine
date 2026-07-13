@@ -19,7 +19,7 @@ from app.models import *  # noqa: F403
 
 config = context.config
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.database_url)
+config.set_main_option("sqlalchemy.url", settings.normalized_database_url())
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
@@ -75,7 +75,7 @@ def ensure_alembic_version_table_compatibility(connection) -> None:
 
 
 def run_migrations_offline():
-    context.configure(url=settings.database_url, target_metadata=target_metadata, literal_binds=True)
+    context.configure(url=settings.normalized_database_url(), target_metadata=target_metadata, literal_binds=True)
     with context.begin_transaction():
         context.run_migrations()
 

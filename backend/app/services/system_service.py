@@ -67,6 +67,8 @@ def check_database_readiness() -> dict:
 
 
 def check_redis_readiness(settings: Settings) -> dict:
+    if not settings.redis_url:
+        return _status_payload("disabled", "Redis not configured")
     try:
         client = Redis.from_url(settings.redis_url)
         client.ping()
