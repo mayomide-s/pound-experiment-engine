@@ -17,3 +17,4 @@ openai==1.97.1
 runwayml==5.4.0
 python-multipart==0.0.20
 pytest==8.4.1
+stripe==15.3.0

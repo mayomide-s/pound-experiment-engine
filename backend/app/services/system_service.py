@@ -14,6 +14,7 @@ from app.services.providers import (
     get_storage_provider,
     get_video_provider,
 )
+from app.services.payment_service import ensure_stripe_enabled
 from app.services.social_token_crypto import social_token_crypto_health
 
 
@@ -32,6 +33,7 @@ def collect_health_details(settings: Settings) -> dict:
         "video_provider": check_video_provider_readiness(settings),
         "narration": check_narration_readiness(settings),
         "social_publishing": check_social_publishing_readiness(settings),
+        "stripe": check_stripe_readiness(settings),
         "configuration": _status_payload(
             "ok" if not config_errors else "error",
             "Configuration validated" if not config_errors else " ".join(config_errors),
@@ -49,6 +51,8 @@ def collect_health_details(settings: Settings) -> dict:
         "storage_provider": settings.storage_provider,
         "runway_mode_enabled": settings.video_provider == "runway",
         "r2_public_base_url_configured": bool(settings.r2_public_base_url) if settings.storage_provider == "r2" else False,
+        "stripe_enabled": settings.stripe_enabled,
+        "public_site_base_url_configured": bool(settings.public_site_base_url),
         "checks": checks,
     }
 
@@ -126,3 +130,21 @@ def check_social_publishing_readiness(settings: Settings) -> dict:
     if crypto_health.status != "ok":
         return _status_payload("error", crypto_health.detail)
     return _status_payload("ok", "Social publishing foundation configured")
+
+
+def check_stripe_readiness(settings: Settings) -> dict:
+    if not settings.stripe_enabled:
+        return _status_payload("disabled", "Stripe Checkout disabled")
+    errors = settings.stripe_configuration_errors()
+    if errors:
+        return _status_payload("error", " ".join(errors), errors=errors)
+    try:
+        ensure_stripe_enabled(settings)
+        return _status_payload(
+            "ok",
+            "Stripe Checkout configured",
+            public_site_base_url=settings.normalized_public_site_base_url(),
+            public_experiment_campaign_slug=settings.public_experiment_campaign_slug,
+        )
+    except Exception as exc:
+        return _status_payload("error", f"Stripe unavailable: {exc}")

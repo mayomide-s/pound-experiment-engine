@@ -22,6 +22,10 @@ body {
   overflow: hidden;
 }
 
+body:has(.public-shell) {
+  overflow: auto;
+}
+
 button,
 input,
 select,
@@ -62,6 +66,23 @@ button.secondary:hover:not(:disabled) {
   background: #F8FAFC;
   border-color: #CBD5E1;
   box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
+}
+
+.button-link,
+a.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  padding: 0.7rem 1rem;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.secondary-link {
+  border: 1px solid #DDE5F0;
+  background: #FFFFFF;
+  color: #334155;
 }
 
 input,
@@ -257,6 +278,146 @@ pre {
   align-items: center;
   justify-content: center;
   gap: 0.6rem;
+}
+
+.public-shell {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top, rgba(37, 99, 235, 0.18), transparent 36%),
+    linear-gradient(180deg, #F8FBFF 0%, #EFF5FF 100%);
+  padding: 1.25rem;
+}
+
+.public-page {
+  width: min(100%, 960px);
+  margin: 0 auto;
+  display: grid;
+  gap: 1rem;
+}
+
+.public-hero,
+.public-card {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 24px;
+  padding: 1.35rem;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08);
+}
+
+.public-hero h1,
+.public-status-card h1 {
+  margin: 0.2rem 0 0.75rem;
+  font-size: clamp(2rem, 6vw, 4rem);
+  line-height: 0.96;
+  max-width: 12ch;
+}
+
+.public-kicker {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #2563EB;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.public-lead {
+  font-size: 1.05rem;
+  max-width: 56ch;
+  color: #334155;
+}
+
+.public-disclosure-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin: 1rem 0;
+}
+
+.public-disclosure-strip span {
+  border-radius: 999px;
+  padding: 0.45rem 0.8rem;
+  background: #DBEAFE;
+  color: #1D4ED8;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.public-cta-block,
+.public-final-cta,
+.public-status-card,
+.public-share-row {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.public-primary-button {
+  min-height: 52px;
+  font-size: 1rem;
+}
+
+.public-section-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.public-card h2,
+.public-final-cta h2 {
+  margin-top: 0;
+}
+
+.public-steps {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.public-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.25rem 0.2rem 1rem;
+  color: #64748B;
+  font-size: 0.92rem;
+}
+
+.notice-inline {
+  margin: 0;
+  color: #0F766E;
+  font-weight: 600;
+}
+
+.notice-inline.warning {
+  color: #B45309;
+}
+
+.public-status-grid {
+  margin-top: 0.5rem;
+}
+
+@media (min-width: 800px) {
+  .public-shell {
+    padding: 2rem;
+  }
+
+  .public-hero,
+  .public-card {
+    padding: 2rem;
+  }
+
+  .public-section-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    scroll-behavior: auto;
+    transition: none !important;
+    animation: none !important;
+  }
 }
 
 .content {
@@ -709,6 +870,11 @@ pre {
   background: #FEF2F2;
 }
 
+.success-tone {
+  border-color: #BBF7D0;
+  background: #F0FDF4;
+}
+
 .quality-item {
   grid-template-columns: 1fr auto;
   align-items: center;
@@ -862,6 +1028,41 @@ pre {
 
 .create-run-panel .toggle-chip {
   padding: 0.45rem 0.65rem;
+}
+
+.campaigns-grid {
+  grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
+}
+
+.campaign-list-button {
+  border: 1px solid #DDE5F0;
+  border-radius: 12px;
+  background: #FFFFFF;
+  padding: 0.85rem;
+  text-align: left;
+}
+
+.campaign-list-button:hover:not(:disabled) {
+  background: #FFFFFF;
+  border-color: #93C5FD;
+  box-shadow: 0 8px 22px rgba(37, 99, 235, 0.08);
+}
+
+.campaign-list-button-active {
+  border-color: #2563EB;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.campaign-summary-grid {
+  margin-top: 0.5rem;
+}
+
+.variant-card p {
+  margin: 0.2rem 0 0;
+}
+
+.variant-run-panel summary {
+  color: #2563EB;
 }
 
 .app-shell.sidebar-collapsed .sidebar {

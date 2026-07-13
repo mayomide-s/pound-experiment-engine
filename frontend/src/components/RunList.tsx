@@ -51,6 +51,20 @@ function formatCreatedAt(value: string) {
   }).format(date);
 }
 
+function formatCampaignLinkLabel(run: PipelineRunSummary) {
+  if (!run.campaign_id && !run.creative_variant_id) {
+    return null;
+  }
+  const parts = ["Campaign-linked"];
+  if (run.campaign_id) {
+    parts.push(`campaign:${run.campaign_id}`);
+  }
+  if (run.creative_variant_id) {
+    parts.push(`variant:${run.creative_variant_id}`);
+  }
+  return parts.join(" • ");
+}
+
 export function RunList({
   runs,
   totalRuns,
@@ -195,6 +209,7 @@ export function RunList({
                       <span className="status-pill muted">{formatRunStatus(run.status)}</span>
                       {archivedSet.has(run.id) ? <span className="status-pill warning">Archived</span> : null}
                     </div>
+                    {formatCampaignLinkLabel(run) ? <span className="subtle">{formatCampaignLinkLabel(run)}</span> : null}
                     <span>{formatStage(run.current_stage)}</span>
                     {run.video_status ? <span className="subtle">Video: {formatVideoStatus(run.video_status)}</span> : null}
                     {run.error_message ? <span className="error">{run.error_message}</span> : null}
@@ -253,6 +268,7 @@ export function RunList({
                       <span className="status-pill muted">{formatRunStatus(run.status)}</span>
                       <span className="status-pill warning">Archived</span>
                     </div>
+                    {formatCampaignLinkLabel(run) ? <span className="subtle">{formatCampaignLinkLabel(run)}</span> : null}
                     <span>{formatStage(run.current_stage)}</span>
                     {run.video_status ? <span className="subtle">Video: {formatVideoStatus(run.video_status)}</span> : null}
                     {run.error_message ? <span className="error">{run.error_message}</span> : null}

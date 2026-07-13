@@ -204,6 +204,7 @@ export function IdeasPage() {
   const critique = detail?.content_critique ?? null;
   const storyAdherence = detail?.story_adherence_review as Record<string, unknown> | null;
   const promptPreview = useMemo(() => promptOverride.trim() || String(detail?.prompt_preview ?? ""), [detail?.prompt_preview, promptOverride]);
+  const campaignContext = detail?.campaign_context ?? null;
   const promptLength = detail?.review_preflight?.prompt_length;
   const preflightScores = detail?.review_preflight?.scores ?? {};
   const preflightSummary = detail?.review_preflight?.summary ?? "";
@@ -360,6 +361,21 @@ export function IdeasPage() {
                 </div>
               </div>
               <p className="subtle">This is the saved paid-provider prompt preview. Improve and shorten are text-only review actions and do not call Runway.</p>
+              {campaignContext ? (
+                <div className="notice-card">
+                  <strong>Campaign context</strong>
+                  <div className="key-grid campaign-summary-grid">
+                    <div><span>Campaign</span><strong>{campaignContext.campaign_name}</strong></div>
+                    <div><span>Hook</span><strong>{campaignContext.hook_type}</strong></div>
+                    <div><span>Visual</span><strong>{campaignContext.visual_type}</strong></div>
+                    <div><span>Tone</span><strong>{campaignContext.tone}</strong></div>
+                    <div><span>CTA</span><strong>{campaignContext.call_to_action}</strong></div>
+                    <div><span>Requested Duration</span><strong>{campaignContext.requested_duration_seconds ? `${campaignContext.requested_duration_seconds}s` : "n/a"}</strong></div>
+                    <div><span>Voiceover</span><strong>{campaignContext.voiceover_enabled ? "Enabled" : "Disabled"}</strong></div>
+                    <div><span>Text Density</span><strong>{campaignContext.text_density ?? "n/a"}</strong></div>
+                  </div>
+                </div>
+              ) : null}
               {promptLength ? (
                 <div className={`notice-card ${promptTooLong || preflightLow ? "warning" : ""}`}>
                   <strong>Prompt length</strong>

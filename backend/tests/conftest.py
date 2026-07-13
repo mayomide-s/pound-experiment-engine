@@ -69,6 +69,11 @@ def isolate_provider_environment(monkeypatch):
         "R2_SECRET_ACCESS_KEY",
         "R2_BUCKET_NAME",
         "R2_PUBLIC_BASE_URL",
+        "STRIPE_ENABLED",
+        "STRIPE_SECRET_KEY",
+        "STRIPE_WEBHOOK_SECRET",
+        "PUBLIC_SITE_BASE_URL",
+        "PUBLIC_EXPERIMENT_CAMPAIGN_SLUG",
     ]
 
     for key in provider_env_keys:

@@ -20,6 +20,11 @@ class Settings(BaseSettings):
         default="http://localhost:5173,http://127.0.0.1:5173",
         alias="CORS_ALLOWED_ORIGINS",
     )
+    public_site_base_url: str = Field(default="http://localhost:5173", alias="PUBLIC_SITE_BASE_URL")
+    public_experiment_campaign_slug: str = Field(default="the-one-pound-experiment", alias="PUBLIC_EXPERIMENT_CAMPAIGN_SLUG")
+    stripe_enabled: bool = Field(default=False, alias="STRIPE_ENABLED")
+    stripe_secret_key: str = Field(default="", alias="STRIPE_SECRET_KEY")
+    stripe_webhook_secret: str = Field(default="", alias="STRIPE_WEBHOOK_SECRET")
 
     database_url: str = Field(default="sqlite:///./socipost.db", alias="DATABASE_URL")
     redis_url: str = Field(default="redis://redis:6379/0", alias="REDIS_URL")
@@ -83,6 +88,9 @@ class Settings(BaseSettings):
     def session_secret_value(self) -> str:
         return self.app_session_secret or self.app_access_password
 
+    def normalized_public_site_base_url(self) -> str:
+        return self.public_site_base_url.rstrip("/")
+
     def is_development_like_environment(self) -> bool:
         return self.environment.lower() in {"development", "dev", "local", "test", "testing"}
 
@@ -115,6 +123,33 @@ class Settings(BaseSettings):
             "GOOGLE_OAUTH_FRONTEND_ERROR_URL": self.google_oauth_frontend_error_url,
         }
         return [name for name, value in required.items() if not value]
+
+    def stripe_missing_configuration(self) -> list[str]:
+        if not self.stripe_enabled:
+            return []
+        required = {
+            "STRIPE_SECRET_KEY": self.stripe_secret_key,
+            "STRIPE_WEBHOOK_SECRET": self.stripe_webhook_secret,
+            "PUBLIC_SITE_BASE_URL": self.public_site_base_url,
+            "PUBLIC_EXPERIMENT_CAMPAIGN_SLUG": self.public_experiment_campaign_slug,
+        }
+        return [name for name, value in required.items() if not value]
+
+    def stripe_configuration_errors(self) -> list[str]:
+        if not self.stripe_enabled:
+            return []
+        errors: list[str] = []
+        missing = self.stripe_missing_configuration()
+        if missing:
+            errors.append(f"Missing Stripe settings: {', '.join(missing)}")
+        if self.public_site_base_url:
+            public_base_url_error = self._validate_redirect_url(
+                self.public_site_base_url,
+                "PUBLIC_SITE_BASE_URL",
+            )
+            if public_base_url_error:
+                errors.append(public_base_url_error)
+        return errors
 
     def social_publishing_configuration_errors(self) -> list[str]:
         errors: list[str] = []
@@ -165,6 +200,7 @@ class Settings(BaseSettings):
             "video": [],
             "semantic_critic": [],
             "narration": [],
+            "stripe": [],
         }
         if self.auth_enabled:
             required["auth"] = ["APP_ACCESS_PASSWORD"]
@@ -184,6 +220,13 @@ class Settings(BaseSettings):
             self.narration_writer_provider == "openai" or self.narration_speech_provider == "openai"
         ):
             required["narration"] = ["OPENAI_API_KEY"]
+        if self.stripe_enabled:
+            required["stripe"] = [
+                "STRIPE_SECRET_KEY",
+                "STRIPE_WEBHOOK_SECRET",
+                "PUBLIC_SITE_BASE_URL",
+                "PUBLIC_EXPERIMENT_CAMPAIGN_SLUG",
+            ]
 
         values = {
             "DATABASE_URL": self.database_url,
@@ -198,6 +241,10 @@ class Settings(BaseSettings):
             "R2_PUBLIC_BASE_URL": self.r2_public_base_url,
             "RUNWAY_API_KEY": self.runway_api_key,
             "OPENAI_API_KEY": self.openai_api_key,
+            "STRIPE_SECRET_KEY": self.stripe_secret_key,
+            "STRIPE_WEBHOOK_SECRET": self.stripe_webhook_secret,
+            "PUBLIC_SITE_BASE_URL": self.public_site_base_url,
+            "PUBLIC_EXPERIMENT_CAMPAIGN_SLUG": self.public_experiment_campaign_slug,
         }
 
         missing: dict[str, list[str]] = {}
@@ -227,6 +274,11 @@ class Settings(BaseSettings):
             errors.append(
                 f"Missing required narration settings for {mode_label}: {', '.join(missing['narration'])}"
             )
+        if missing.get("stripe"):
+            errors.append(
+                f"Missing required Stripe settings for {mode_label}: {', '.join(missing['stripe'])}"
+            )
+        errors.extend(self.stripe_configuration_errors())
         return errors
 
     def validate_configuration(self) -> None:

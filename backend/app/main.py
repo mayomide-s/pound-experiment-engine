@@ -14,12 +14,15 @@ from app.config import get_settings
 from app.db.session import SessionLocal
 from app.routers.access import router as access_router
 from app.routers.asset_library import router as asset_library_router
+from app.routers.campaigns import router as campaigns_router
 from app.routers.idea_queue import router as idea_queue_router
 from app.routers.performance import router as performance_router
 from app.routers.pipeline_runs import router as pipeline_runs_router
+from app.routers.public_payments import router as public_payments_router
 from app.routers.publication_jobs import router as publication_jobs_router
 from app.routers.settings import router as settings_router
 from app.routers.social_connections import router as social_connections_router
+from app.routers.stripe_webhooks import router as stripe_webhooks_router
 from app.services.providers import get_video_provider
 from app.services.pipeline_service import seed_default_account
 from app.services.system_service import collect_health_details
@@ -69,6 +72,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(access_router, prefix=settings.api_prefix)
+app.include_router(campaigns_router, prefix=settings.api_prefix)
 app.include_router(pipeline_runs_router, prefix=settings.api_prefix)
 app.include_router(performance_router, prefix=settings.api_prefix)
 app.include_router(idea_queue_router, prefix=settings.api_prefix)
@@ -76,6 +80,8 @@ app.include_router(asset_library_router, prefix=settings.api_prefix)
 app.include_router(settings_router, prefix=settings.api_prefix)
 app.include_router(social_connections_router, prefix=settings.api_prefix)
 app.include_router(publication_jobs_router, prefix=settings.api_prefix)
+app.include_router(public_payments_router, prefix=settings.api_prefix)
+app.include_router(stripe_webhooks_router, prefix=settings.api_prefix)
 Path(settings.local_storage_path).mkdir(parents=True, exist_ok=True)
 app.mount("/assets", StaticFiles(directory=settings.local_storage_path), name="assets")
 

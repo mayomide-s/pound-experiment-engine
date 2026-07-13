@@ -10,6 +10,8 @@ from app.models.entities import ManualPostingStatus
 class PipelineRunCreate(BaseModel):
     topic: str
     auto_mode: bool = False
+    campaign_id: str | None = None
+    creative_variant_id: str | None = None
     style_preset: str | None = None
     target_platforms: list[str] | None = None
     caption_tone: str | None = None
@@ -140,3 +142,4 @@ class AggregatedPipelineRunResponse(BaseModel):
     performance_learnings_summary: dict[str, Any] | None = None
     review_sections: dict[str, str] | None = None
     review_preflight: dict[str, Any] | None = None
+    campaign_context: dict[str, Any] | None = None
