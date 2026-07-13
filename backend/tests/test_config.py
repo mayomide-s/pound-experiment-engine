@@ -20,7 +20,10 @@ def test_app_env_takes_precedence_over_environment():
     assert settings.environment == "staging"
 
 
-def test_environment_defaults_when_no_alias_is_set():
+def test_environment_defaults_when_no_alias_is_set(monkeypatch):
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     settings = Settings()
 
     assert settings.environment == "development"
@@ -50,13 +53,15 @@ def test_normalized_database_url_leaves_unsupported_scheme_unchanged():
     assert settings.normalized_database_url() == "mysql://user:pass@db.example.com:3306/app"
 
 
-def test_redis_url_is_optional_for_settings():
+def test_redis_url_is_optional_for_settings(monkeypatch):
+    monkeypatch.delenv("REDIS_URL", raising=False)
     settings = Settings(DATABASE_URL="sqlite:///./test.db")
 
     assert settings.redis_url == ""
 
 
-def test_redis_health_is_disabled_when_url_not_configured():
+def test_redis_health_is_disabled_when_url_not_configured(monkeypatch):
+    monkeypatch.delenv("REDIS_URL", raising=False)
     settings = Settings(DATABASE_URL="sqlite:///./test.db")
 
     result = check_redis_readiness(settings)
