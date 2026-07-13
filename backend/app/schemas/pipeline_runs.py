@@ -10,6 +10,8 @@ from app.models.entities import ManualPostingStatus
 class PipelineRunCreate(BaseModel):
     topic: str
     auto_mode: bool = False
+    campaign_id: str | None = None
+    creative_variant_id: str | None = None
     style_preset: str | None = None
     target_platforms: list[str] | None = None
     caption_tone: str | None = None

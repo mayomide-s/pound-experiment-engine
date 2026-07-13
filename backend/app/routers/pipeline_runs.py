@@ -41,6 +41,7 @@ from app.services.pipeline_service import (
     resume_pipeline,
 )
 from app.services.access_service import require_app_access
+from app.services.campaign_service import CampaignConflictError, CampaignNotFoundError
 from app.services.narration_service import (
     PaidNarrationConfirmationRequiredError,
     create_narration_draft,
@@ -59,6 +60,10 @@ router = APIRouter(prefix="/pipeline-runs", tags=["pipeline-runs"], dependencies
 def create_run(payload: PipelineRunCreate, db: Session = Depends(get_db)):
     try:
         return get_pipeline_run_detail(db, create_pipeline_run(db, payload).id)
+    except CampaignNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CampaignConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

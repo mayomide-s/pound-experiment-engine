@@ -18,7 +18,7 @@ from app.models.entities import PerformanceLearning
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-EXPECTED_HEAD = "0020_youtube_publication_execution"
+EXPECTED_HEAD = "0021_campaign_foundation"
 TEST_POSTGRES_DATABASE_URL = os.environ.get("TEST_POSTGRES_DATABASE_URL")
 
 
@@ -194,6 +194,9 @@ def test_postgres_fresh_database_upgrades_from_base_to_head_and_is_idempotent():
         manual_package_columns = {column["name"] for column in inspector.get_columns("manual_post_packages")}
         assert {"winner_platform_post_id", "winner_selected_at", "winner_selection_revision"} <= manual_package_columns
         assert "performance_learnings" in inspector.get_table_names()
+        assert {"campaigns", "creative_variants"} <= set(inspector.get_table_names())
+        pipeline_run_columns = {column["name"] for column in inspector.get_columns("pipeline_runs")}
+        assert {"campaign_id", "creative_variant_id"} <= pipeline_run_columns
 
         run_id = _create_run(engine, "Postgres fresh base")
         learning = _insert_learning_without_is_archived(engine, run_id, "Fresh base default should be false.")
@@ -229,6 +232,9 @@ def test_postgres_migration_upgrade_from_0015_and_repeated_head_is_idempotent():
         manual_package_columns = {column["name"] for column in inspector.get_columns("manual_post_packages")}
         assert {"winner_platform_post_id", "winner_selected_at", "winner_selection_revision"} <= manual_package_columns
         assert "performance_learnings" in inspector.get_table_names()
+        assert {"campaigns", "creative_variants"} <= set(inspector.get_table_names())
+        pipeline_run_columns = {column["name"] for column in inspector.get_columns("pipeline_runs")}
+        assert {"campaign_id", "creative_variant_id"} <= pipeline_run_columns
 
         run_id = _create_run(engine, "Postgres scenario A")
         learning = _insert_learning_without_is_archived(engine, run_id, "Default should be false.")
@@ -288,6 +294,9 @@ def test_postgres_direct_create_all_uses_portable_false_default():
 
         inspector = inspect(engine)
         assert "performance_learnings" in inspector.get_table_names()
+        assert {"campaigns", "creative_variants"} <= set(inspector.get_table_names())
+        pipeline_run_columns = {column["name"] for column in inspector.get_columns("pipeline_runs")}
+        assert {"campaign_id", "creative_variant_id"} <= pipeline_run_columns
 
         run_id = _create_run(engine, "Postgres create_all")
         learning = _insert_learning_without_is_archived(engine, run_id, "Create all succeeds.")

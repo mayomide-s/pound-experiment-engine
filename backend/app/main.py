@@ -14,6 +14,7 @@ from app.config import get_settings
 from app.db.session import SessionLocal
 from app.routers.access import router as access_router
 from app.routers.asset_library import router as asset_library_router
+from app.routers.campaigns import router as campaigns_router
 from app.routers.idea_queue import router as idea_queue_router
 from app.routers.performance import router as performance_router
 from app.routers.pipeline_runs import router as pipeline_runs_router
@@ -69,6 +70,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(access_router, prefix=settings.api_prefix)
+app.include_router(campaigns_router, prefix=settings.api_prefix)
 app.include_router(pipeline_runs_router, prefix=settings.api_prefix)
 app.include_router(performance_router, prefix=settings.api_prefix)
 app.include_router(idea_queue_router, prefix=settings.api_prefix)

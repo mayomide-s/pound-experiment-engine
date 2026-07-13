@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from app.config import Settings, get_settings
 from app.db.session import SessionLocal
+from app.models import CreativeVariant, PipelineRun
 from app.providers.storage.r2_provider import R2StorageProvider
 from app.providers.video.runway_provider import RunwayVideoProvider
 from app.services.security import sanitize_for_json
@@ -56,6 +57,161 @@ def test_resume_run_accepts_no_body(client):
     payload = resume.json()
     assert payload["pipeline_run"]["status"] == "completed"
     assert payload["pipeline_run"]["review_notes"] == "Approved from dashboard"
+
+
+def test_campaign_aware_pipeline_run_creation(client):
+    campaign = client.post(
+        "/api/campaigns",
+        json={
+            "name": "Campaign Run",
+            "slug": f"campaign-run-{uuid4().hex[:8]}",
+            "core_question": "Would you give a stranger £1?",
+            "currency": "GBP",
+            "target_amount_minor": 100,
+            "target_reach": 10000000,
+        },
+    ).json()
+    variant = client.post(
+        f"/api/campaigns/{campaign['id']}/variants",
+        json={
+            "hook_type": "street-interview",
+            "visual_type": "reaction-cuts",
+            "tone": "direct",
+            "call_to_action": "Take part in the experiment.",
+            "video_length_seconds": 12,
+            "voiceover_enabled": False,
+            "text_density": "low",
+            "tracking_code": f"track-{uuid4().hex[:8]}",
+        },
+    ).json()
+
+    response = client.post(
+        "/api/pipeline-runs",
+        json={
+            "topic": "Would you give a stranger £1?",
+            "auto_mode": False,
+            "campaign_id": campaign["id"],
+            "creative_variant_id": variant["id"],
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["pipeline_run"]["campaign_id"] == campaign["id"]
+    assert payload["pipeline_run"]["creative_variant_id"] == variant["id"]
+
+    with SessionLocal() as db:
+        stored_variant = db.get(CreativeVariant, variant["id"])
+        assert stored_variant.pipeline_run is not None
+        assert stored_variant.pipeline_run.id == payload["pipeline_run"]["id"]
+        stored_run = db.get(PipelineRun, payload["pipeline_run"]["id"])
+        assert stored_run.creative_variant_id == variant["id"]
+
+
+def test_reject_mismatched_campaign_and_variant(client):
+    campaign_a = client.post(
+        "/api/campaigns",
+        json={
+            "name": "Campaign A",
+            "slug": f"campaign-a-{uuid4().hex[:8]}",
+            "core_question": "Would you give a stranger £1?",
+            "currency": "GBP",
+            "target_amount_minor": 100,
+            "target_reach": 10000000,
+        },
+    ).json()
+    campaign_b = client.post(
+        "/api/campaigns",
+        json={
+            "name": "Campaign B",
+            "slug": f"campaign-b-{uuid4().hex[:8]}",
+            "core_question": "Would you give a stranger £1?",
+            "currency": "GBP",
+            "target_amount_minor": 100,
+            "target_reach": 10000000,
+        },
+    ).json()
+    variant = client.post(
+        f"/api/campaigns/{campaign_a['id']}/variants",
+        json={
+            "hook_type": "street-interview",
+            "visual_type": "reaction-cuts",
+            "tone": "direct",
+            "call_to_action": "Take part in the experiment.",
+            "video_length_seconds": 12,
+            "voiceover_enabled": False,
+            "text_density": "low",
+            "tracking_code": f"track-{uuid4().hex[:8]}",
+        },
+    ).json()
+
+    response = client.post(
+        "/api/pipeline-runs",
+        json={
+            "topic": "Mismatch",
+            "auto_mode": False,
+            "campaign_id": campaign_b["id"],
+            "creative_variant_id": variant["id"],
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Creative variant does not belong to the supplied campaign"
+
+
+def test_legacy_pipeline_run_creation_without_campaign_data(client):
+    response = client.post("/api/pipeline-runs", json={"topic": "Legacy mode", "auto_mode": False})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["pipeline_run"]["campaign_id"] is None
+    assert payload["pipeline_run"]["creative_variant_id"] is None
+
+
+def test_pipeline_run_rejects_reused_creative_variant(client):
+    campaign = client.post(
+        "/api/campaigns",
+        json={
+            "name": "Campaign Reuse",
+            "slug": f"campaign-reuse-{uuid4().hex[:8]}",
+            "core_question": "Would you give a stranger £1?",
+            "currency": "GBP",
+            "target_amount_minor": 100,
+            "target_reach": 10000000,
+        },
+    ).json()
+    variant = client.post(
+        f"/api/campaigns/{campaign['id']}/variants",
+        json={
+            "hook_type": "street-interview",
+            "visual_type": "reaction-cuts",
+            "tone": "direct",
+            "call_to_action": "Take part in the experiment.",
+            "video_length_seconds": 12,
+            "voiceover_enabled": False,
+            "text_density": "low",
+            "tracking_code": f"track-{uuid4().hex[:8]}",
+        },
+    ).json()
+
+    first = client.post(
+        "/api/pipeline-runs",
+        json={
+            "topic": "First run",
+            "auto_mode": False,
+            "campaign_id": campaign["id"],
+            "creative_variant_id": variant["id"],
+        },
+    )
+    second = client.post(
+        "/api/pipeline-runs",
+        json={
+            "topic": "Second run",
+            "auto_mode": False,
+            "campaign_id": campaign["id"],
+            "creative_variant_id": variant["id"],
+        },
+    )
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["detail"] == "Creative variant is already attached to a pipeline run"
 
 
 def test_runway_resume_without_confirmation_is_rejected(client, monkeypatch):

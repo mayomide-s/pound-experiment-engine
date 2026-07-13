@@ -11,7 +11,9 @@ from app.config import get_settings
 from app.models import (
     Account,
     Asset,
+    Campaign,
     ContentIdea,
+    CreativeVariant,
     GenerationCost,
     ManualPackageStatus,
     ManualPostPackage,
@@ -40,6 +42,7 @@ from app.services.final_asset_service import ensure_manual_package_final_asset_d
 from app.services.performance_learning_service import build_performance_learnings_summary
 from app.services.performance_winner_service import build_winner_selection_payload
 from app.services.providers import get_llm_provider, get_storage_provider, get_video_provider
+from app.services.campaign_service import CampaignConflictError, CampaignNotFoundError
 from app.services.narration_service import build_narration_payloads
 from app.services.semantic_critic_service import (
     build_story_adherence_payload,
@@ -984,11 +987,43 @@ def get_default_account(db: Session) -> Account:
     return seed_default_account(db)
 
 
+def resolve_pipeline_campaign_context(
+    db: Session,
+    campaign_id: str | None,
+    creative_variant_id: str | None,
+) -> tuple[Campaign | None, CreativeVariant | None]:
+    campaign = None
+    creative_variant = None
+    if campaign_id is not None:
+        campaign = db.get(Campaign, campaign_id)
+        if campaign is None:
+            raise CampaignNotFoundError("Campaign not found")
+    if creative_variant_id is not None:
+        creative_variant = db.get(CreativeVariant, creative_variant_id)
+        if creative_variant is None:
+            raise CampaignNotFoundError("Creative variant not found")
+        existing_run = (
+            db.query(PipelineRun.id)
+            .filter(PipelineRun.creative_variant_id == creative_variant.id)
+            .first()
+        )
+        if existing_run is not None:
+            raise CampaignConflictError("Creative variant is already attached to a pipeline run")
+        if campaign is not None and creative_variant.campaign_id != campaign.id:
+            raise CampaignConflictError("Creative variant does not belong to the supplied campaign")
+        if campaign is None:
+            campaign = db.get(Campaign, creative_variant.campaign_id)
+    return campaign, creative_variant
+
+
 def create_pipeline_run(db: Session, payload: PipelineRunCreate) -> PipelineRun:
     account = get_default_account(db)
     input_config = build_run_input_config(account.account_config_json or {}, payload)
+    campaign, creative_variant = resolve_pipeline_campaign_context(db, payload.campaign_id, payload.creative_variant_id)
     run = PipelineRun(
         account_id=account.id,
+        campaign_id=campaign.id if campaign else None,
+        creative_variant_id=creative_variant.id if creative_variant else None,
         topic=payload.topic,
         auto_mode=payload.auto_mode,
         style_preset=input_config["style_preset"],

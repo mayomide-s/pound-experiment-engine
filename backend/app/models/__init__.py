@@ -1,7 +1,10 @@
 from app.models.entities import (
     Account,
     Asset,
+    Campaign,
+    CampaignStatus,
     ContentIdea,
+    CreativeVariant,
     GenerationCost,
     IdeaQueueItem,
     IdeaQueueStatus,
@@ -37,7 +40,10 @@ from app.models.entities import (
 __all__ = [
     "Account",
     "Asset",
+    "Campaign",
+    "CampaignStatus",
     "ContentIdea",
+    "CreativeVariant",
     "GenerationCost",
     "IdeaQueueItem",
     "IdeaQueueStatus",
