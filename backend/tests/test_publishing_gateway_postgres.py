@@ -35,7 +35,7 @@ from app.services.social_token_crypto import decrypt_secret
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-EXPECTED_HEAD = "0022_checkout_sessions"
+EXPECTED_HEAD = "0023_checkout_referrals"
 PUBLICATION_GATEWAY_HEAD = "0020_youtube_publication_execution"
 TEST_POSTGRES_DATABASE_URL = os.environ.get("TEST_POSTGRES_DATABASE_URL")
 

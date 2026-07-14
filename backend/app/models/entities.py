@@ -298,6 +298,8 @@ class CheckoutSessionRecord(Base):
     payment_status: Mapped[str | None] = mapped_column(String(64))
     customer_email: Mapped[str | None] = mapped_column(String(255))
     source_code: Mapped[str | None] = mapped_column(String(120))
+    referring_referral_code: Mapped[str | None] = mapped_column(String(32), index=True)
+    referral_code: Mapped[str | None] = mapped_column(String(32), unique=True, index=True)
     stripe_event_id: Mapped[str | None] = mapped_column(String(255), unique=True)
     metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

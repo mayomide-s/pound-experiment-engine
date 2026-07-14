@@ -6,6 +6,7 @@ import { PublicFooter } from "../components/PublicFooter";
 import { PublicPolicyNav } from "../components/PublicPolicyNav";
 import { api, type PublicExperimentStatsResponse } from "../api/client";
 import { FAQ_ITEMS, HOW_IT_WORKS_STEPS, MONEY_USE_STATEMENT, TRUST_POINTS } from "../public/content";
+import { normalizePublicReferralCode } from "../public/share";
 
 const EXPERIMENT_URL = "/experiment";
 const DEFAULT_SOURCE_CODE = "direct";
@@ -89,7 +90,9 @@ export function PublicExperimentPage() {
 
   const checkoutState = searchParams.get("checkout");
   const rawSourceCode = searchParams.get("source_code") ?? searchParams.get("source");
+  const rawReferralCode = searchParams.get("ref");
   const normalizedSourceCode = useMemo(() => normalizePublicSourceCode(rawSourceCode), [rawSourceCode]);
+  const normalizedReferralCode = useMemo(() => normalizePublicReferralCode(rawReferralCode), [rawReferralCode]);
   const invalidSharedSource = Boolean(rawSourceCode && normalizedSourceCode === DEFAULT_SOURCE_CODE);
   const displaySourceCode = normalizedSourceCode === DEFAULT_SOURCE_CODE ? "" : normalizedSourceCode;
 
@@ -151,7 +154,10 @@ export function PublicExperimentPage() {
     try {
       setIsSubmitting(true);
       setError("");
-      const response = await api.createPublicCheckoutSession({ source_code: normalizedSourceCode });
+      const response = await api.createPublicCheckoutSession({
+        source_code: normalizedSourceCode,
+        referral_code: normalizedReferralCode,
+      });
       window.location.assign(response.checkout_url);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to start secure checkout right now.");

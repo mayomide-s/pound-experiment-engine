@@ -756,6 +756,9 @@ export function DashboardPage() {
                   <div><span>Payments Today</span><strong>{experimentAnalytics.payments_today}</strong></div>
                   <div><span>Amount Collected</span><strong>{formatMoney(experimentAnalytics.amount_collected_minor, experimentAnalytics.currency)}</strong></div>
                   <div><span>Conversion Rate</span><strong>{(experimentAnalytics.conversion_rate * 100).toFixed(1)}%</strong></div>
+                  <div><span>Referred Sessions</span><strong>{experimentAnalytics.referred_checkout_sessions}</strong></div>
+                  <div><span>Referred Payments</span><strong>{experimentAnalytics.referred_completed_payments}</strong></div>
+                  <div><span>Referral Conversion</span><strong>{(experimentAnalytics.referral_conversion_rate * 100).toFixed(1)}%</strong></div>
                 </div>
                 <div className="public-section-grid">
                   <article className="public-card">
@@ -785,6 +788,35 @@ export function DashboardPage() {
                       <p className="subtle">No source analytics yet.</p>
                     )}
                   </article>
+                  <article className="public-card">
+                    <h2>Top Referrers</h2>
+                    {experimentAnalytics.top_referrers.length > 0 ? (
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>Referral Code</th>
+                            <th>Started</th>
+                            <th>Completed</th>
+                            <th>Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {experimentAnalytics.top_referrers.map((referrer) => (
+                            <tr key={referrer.referral_code}>
+                              <td>{referrer.referral_code}</td>
+                              <td>{referrer.checkout_sessions_started}</td>
+                              <td>{referrer.completed_payments}</td>
+                              <td>{formatMoney(referrer.amount_collected_minor, experimentAnalytics.currency)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <p className="subtle">No referral analytics yet.</p>
+                    )}
+                  </article>
+                </div>
+                <div className="public-section-grid">
                   <article className="public-card">
                     <h2>Recent Payments</h2>
                     {experimentAnalytics.recent_payments.length > 0 ? (

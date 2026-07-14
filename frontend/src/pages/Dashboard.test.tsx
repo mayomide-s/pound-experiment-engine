@@ -107,6 +107,28 @@ beforeEach(() => {
   vi.spyOn(api, "listRuns").mockResolvedValue([]);
   vi.spyOn(api, "getRun").mockResolvedValue(makeRunDetail("Loaded run"));
   vi.spyOn(api, "createRun").mockResolvedValue(makeRunDetail("Created run"));
+  vi.spyOn(api, "getExperimentAnalytics").mockResolvedValue({
+    campaign_slug: "the-one-pound-experiment",
+    checkout_sessions_started: 4,
+    completed_payments: 3,
+    payments_today: 2,
+    amount_collected_minor: 300,
+    currency: "GBP",
+    conversion_rate: 0.75,
+    referred_checkout_sessions: 2,
+    referred_completed_payments: 1,
+    referral_conversion_rate: 0.5,
+    top_sources: [],
+    top_referrers: [
+      {
+        referral_code: "r_ab12cd34",
+        checkout_sessions_started: 2,
+        completed_payments: 1,
+        amount_collected_minor: 100,
+      },
+    ],
+    recent_payments: [],
+  });
 });
 
 afterEach(() => {
@@ -325,5 +347,20 @@ describe("DashboardPage handoff precedence", () => {
         content_format: "coding metaphor",
       }),
     );
+  });
+
+  it("renders referral analytics metrics and top referrers", async () => {
+    vi.spyOn(api, "getAccountDefaults").mockResolvedValue(makeAccountDefaults());
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText("Referred Sessions")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Referral Conversion")).toBeInTheDocument();
+    expect(screen.getByText("Top Referrers")).toBeInTheDocument();
+    expect(screen.getByText("r_ab12cd34")).toBeInTheDocument();
+    expect(screen.getByText("50.0%")).toBeInTheDocument();
   });
 });

@@ -18,7 +18,7 @@ from app.models.entities import PerformanceLearning
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-EXPECTED_HEAD = "0022_checkout_sessions"
+EXPECTED_HEAD = "0023_checkout_referrals"
 TEST_POSTGRES_DATABASE_URL = os.environ.get("TEST_POSTGRES_DATABASE_URL")
 
 
@@ -85,6 +85,27 @@ def _version_column_length(engine) -> int | None:
         if column["name"] == "version_num"
     )
     return version_column["type"].length
+
+
+def _checkout_referral_column_map(engine) -> dict[str, dict]:
+    inspector = inspect(engine)
+    return {
+        column["name"]: column
+        for column in inspector.get_columns("checkout_session_records")
+        if column["name"] in {"referral_code", "referring_referral_code"}
+    }
+
+
+def _checkout_referral_index_map(engine) -> dict[str, dict]:
+    inspector = inspect(engine)
+    return {
+        index["name"]: index
+        for index in inspector.get_indexes("checkout_session_records")
+        if index["name"] in {
+            "ix_checkout_session_records_referral_code",
+            "ix_checkout_session_records_referring_referral_code",
+        }
+    }
 
 
 def _create_run(engine, topic: str) -> str:
@@ -267,6 +288,14 @@ def test_postgres_fresh_database_upgrades_from_base_to_head_and_is_idempotent():
         assert {"winner_platform_post_id", "winner_selected_at", "winner_selection_revision"} <= manual_package_columns
         assert "performance_learnings" in inspector.get_table_names()
         assert {"campaigns", "creative_variants", "checkout_session_records"} <= set(inspector.get_table_names())
+        checkout_columns = {column["name"] for column in inspector.get_columns("checkout_session_records")}
+        assert {"referral_code", "referring_referral_code"} <= checkout_columns
+        referral_columns = _checkout_referral_column_map(engine)
+        assert referral_columns["referral_code"]["nullable"] is True
+        assert referral_columns["referring_referral_code"]["nullable"] is True
+        referral_indexes = _checkout_referral_index_map(engine)
+        assert referral_indexes["ix_checkout_session_records_referral_code"]["unique"] is True
+        assert referral_indexes["ix_checkout_session_records_referring_referral_code"]["unique"] is False
         pipeline_run_columns = {column["name"] for column in inspector.get_columns("pipeline_runs")}
         assert {"campaign_id", "creative_variant_id"} <= pipeline_run_columns
 
@@ -305,6 +334,14 @@ def test_postgres_migration_upgrade_from_0015_and_repeated_head_is_idempotent():
         assert {"winner_platform_post_id", "winner_selected_at", "winner_selection_revision"} <= manual_package_columns
         assert "performance_learnings" in inspector.get_table_names()
         assert {"campaigns", "creative_variants", "checkout_session_records"} <= set(inspector.get_table_names())
+        checkout_columns = {column["name"] for column in inspector.get_columns("checkout_session_records")}
+        assert {"referral_code", "referring_referral_code"} <= checkout_columns
+        referral_columns = _checkout_referral_column_map(engine)
+        assert referral_columns["referral_code"]["nullable"] is True
+        assert referral_columns["referring_referral_code"]["nullable"] is True
+        referral_indexes = _checkout_referral_index_map(engine)
+        assert referral_indexes["ix_checkout_session_records_referral_code"]["unique"] is True
+        assert referral_indexes["ix_checkout_session_records_referring_referral_code"]["unique"] is False
         pipeline_run_columns = {column["name"] for column in inspector.get_columns("pipeline_runs")}
         assert {"campaign_id", "creative_variant_id"} <= pipeline_run_columns
 
@@ -367,6 +404,14 @@ def test_postgres_direct_create_all_uses_portable_false_default():
         inspector = inspect(engine)
         assert "performance_learnings" in inspector.get_table_names()
         assert {"campaigns", "creative_variants", "checkout_session_records"} <= set(inspector.get_table_names())
+        checkout_columns = {column["name"] for column in inspector.get_columns("checkout_session_records")}
+        assert {"referral_code", "referring_referral_code"} <= checkout_columns
+        referral_columns = _checkout_referral_column_map(engine)
+        assert referral_columns["referral_code"]["nullable"] is True
+        assert referral_columns["referring_referral_code"]["nullable"] is True
+        referral_indexes = _checkout_referral_index_map(engine)
+        assert referral_indexes["ix_checkout_session_records_referral_code"]["unique"] is True
+        assert referral_indexes["ix_checkout_session_records_referring_referral_code"]["unique"] is False
         pipeline_run_columns = {column["name"] for column in inspector.get_columns("pipeline_runs")}
         assert {"campaign_id", "creative_variant_id"} <= pipeline_run_columns
 
@@ -374,6 +419,28 @@ def test_postgres_direct_create_all_uses_portable_false_default():
         learning = _insert_learning_without_is_archived(engine, run_id, "Create all succeeds.")
         assert learning.is_archived is False
         assert _postgres_default_expression(engine) == "false"
+        engine.dispose()
+
+
+@pytest.mark.skipif(not TEST_POSTGRES_DATABASE_URL, reason="TEST_POSTGRES_DATABASE_URL is not configured.")
+def test_postgres_checkout_referral_migration_downgrades_cleanly_to_0022():
+    admin_url = _get_admin_url()
+    with _temporary_database(admin_url, "story_engine_pgrefdown") as (_database_name, database_url):
+        _run_alembic(database_url, "upgrade", "head")
+        engine = create_engine(database_url, future=True)
+
+        _run_alembic(database_url, "downgrade", "0022_checkout_sessions")
+
+        inspector = inspect(engine)
+        checkout_columns = {column["name"] for column in inspector.get_columns("checkout_session_records")}
+        assert "referral_code" not in checkout_columns
+        assert "referring_referral_code" not in checkout_columns
+        checkout_indexes = {index["name"] for index in inspector.get_indexes("checkout_session_records")}
+        assert "ix_checkout_session_records_referral_code" not in checkout_indexes
+        assert "ix_checkout_session_records_referring_referral_code" not in checkout_indexes
+
+        _run_alembic(database_url, "upgrade", "head")
+        assert _current_revision(engine) == EXPECTED_HEAD
         engine.dispose()
 
 

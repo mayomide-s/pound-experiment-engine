@@ -13,6 +13,7 @@ def _serialize_utc_datetime(value: datetime | None) -> str | None:
 
 class PublicCheckoutSessionCreateRequest(BaseModel):
     source_code: str | None = Field(default=None)
+    referral_code: str | None = Field(default=None)
 
 
 class PublicCheckoutSessionResponse(BaseModel):
@@ -29,6 +30,7 @@ class PublicCheckoutStatusResponse(BaseModel):
     currency: str
     campaign_name: str
     completed_at: datetime | None = None
+    referral_code: str | None = None
 
     @field_serializer("completed_at")
     def serialize_completed_at(self, value: datetime | None) -> str | None:
@@ -65,6 +67,13 @@ class AdminExperimentRecentPaymentResponse(BaseModel):
         return _serialize_utc_datetime(value) or ""
 
 
+class AdminExperimentReferralAnalyticsResponse(BaseModel):
+    referral_code: str
+    checkout_sessions_started: int
+    completed_payments: int
+    amount_collected_minor: int
+
+
 class AdminExperimentAnalyticsResponse(BaseModel):
     campaign_slug: str
     checkout_sessions_started: int
@@ -73,5 +82,9 @@ class AdminExperimentAnalyticsResponse(BaseModel):
     amount_collected_minor: int
     currency: str
     conversion_rate: float
+    referred_checkout_sessions: int
+    referred_completed_payments: int
+    referral_conversion_rate: float
     top_sources: list[AdminExperimentSourceAnalyticsResponse]
+    top_referrers: list[AdminExperimentReferralAnalyticsResponse]
     recent_payments: list[AdminExperimentRecentPaymentResponse]

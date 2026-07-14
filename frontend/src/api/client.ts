@@ -73,6 +73,7 @@ export type CampaignListResponse = {
 
 export type PublicCheckoutSessionCreatePayload = {
   source_code?: string | null;
+  referral_code?: string | null;
 };
 
 export type PublicCheckoutSessionResponse = {
@@ -87,6 +88,7 @@ export type PublicCheckoutStatusResponse = {
   currency: string;
   campaign_name: string;
   completed_at?: string | null;
+  referral_code?: string | null;
 };
 
 export type PublicExperimentStatsResponse = {
@@ -111,6 +113,13 @@ export type AdminExperimentRecentPaymentResponse = {
   source_code: string;
 };
 
+export type AdminExperimentReferralAnalyticsResponse = {
+  referral_code: string;
+  checkout_sessions_started: number;
+  completed_payments: number;
+  amount_collected_minor: number;
+};
+
 export type AdminExperimentAnalyticsResponse = {
   campaign_slug: string;
   checkout_sessions_started: number;
@@ -119,7 +128,11 @@ export type AdminExperimentAnalyticsResponse = {
   amount_collected_minor: number;
   currency: string;
   conversion_rate: number;
+  referred_checkout_sessions: number;
+  referred_completed_payments: number;
+  referral_conversion_rate: number;
   top_sources: AdminExperimentSourceAnalyticsResponse[];
+  top_referrers: AdminExperimentReferralAnalyticsResponse[];
   recent_payments: AdminExperimentRecentPaymentResponse[];
 };
 

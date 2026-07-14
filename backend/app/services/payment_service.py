@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import secrets
 from collections.abc import Sequence
 from collections import defaultdict
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ from app.models import Campaign, CheckoutSessionRecord, CheckoutSessionRecordSta
 from app.schemas.payments import (
     AdminExperimentAnalyticsResponse,
     AdminExperimentRecentPaymentResponse,
+    AdminExperimentReferralAnalyticsResponse,
     AdminExperimentSourceAnalyticsResponse,
     PublicCheckoutStatusResponse,
     PublicExperimentStatsResponse,
@@ -29,6 +31,9 @@ logger = logging.getLogger(__name__)
 EXPERIMENT_TYPE = "one-pound-experiment"
 DEFAULT_SOURCE_CODE = "direct"
 SOURCE_CODE_PATTERN = re.compile(r"^[a-z0-9_-]{1,64}$")
+REFERRAL_CODE_PATTERN = re.compile(r"^r_[a-z0-9_-]{1,30}$")
+REFERRAL_CODE_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
+REFERRAL_CODE_TOKEN_LENGTH = 8
 
 
 class StripeUnavailableError(RuntimeError):
@@ -92,16 +97,40 @@ def normalize_source_code(source_code: str | None) -> str:
     return normalized
 
 
-def build_public_checkout_urls(settings: Settings | None = None, *, source_code: str | None = None) -> tuple[str, str]:
+def normalize_referral_code(referral_code: str | None) -> str | None:
+    if referral_code is None:
+        return None
+    normalized = str(referral_code).strip().lower()
+    if not normalized or not REFERRAL_CODE_PATTERN.fullmatch(normalized):
+        return None
+    return normalized
+
+
+def generate_referral_code() -> str:
+    token = "".join(secrets.choice(REFERRAL_CODE_ALPHABET) for _ in range(REFERRAL_CODE_TOKEN_LENGTH))
+    return f"r_{token}"
+
+
+def build_public_checkout_urls(
+    settings: Settings | None = None,
+    *,
+    source_code: str | None = None,
+    referral_code: str | None = None,
+) -> tuple[str, str]:
     active_settings = ensure_stripe_enabled(settings)
     base_url = active_settings.normalized_public_site_base_url()
     normalized_source_code = normalize_source_code(source_code)
-    extra_query = ""
+    normalized_referral_code = normalize_referral_code(referral_code)
+    query_items: list[tuple[str, str]] = []
     if normalized_source_code != DEFAULT_SOURCE_CODE:
-        extra_query = f"&{urlencode({'source': normalized_source_code})}"
+        query_items.append(("source", normalized_source_code))
+    if normalized_referral_code:
+        query_items.append(("ref", normalized_referral_code))
+    extra_query = f"&{urlencode(query_items)}" if query_items else ""
+    cancel_query = urlencode([("checkout", "cancelled"), *query_items])
     return (
         f"{base_url}/experiment/thank-you?session_id={{CHECKOUT_SESSION_ID}}{extra_query}",
-        f"{base_url}/experiment?checkout=cancelled{extra_query}",
+        f"{base_url}/experiment?{cancel_query}",
     )
 
 
@@ -120,14 +149,32 @@ def _safe_session_payload(session_obj: Any) -> tuple[str, str]:
     return checkout_session_id, checkout_url
 
 
-def create_public_checkout_session(db: Session, *, source_code: str | None = None) -> tuple[CheckoutSessionRecord, dict[str, str]]:
+def create_public_checkout_session(
+    db: Session,
+    *,
+    source_code: str | None = None,
+    referral_code: str | None = None,
+) -> tuple[CheckoutSessionRecord, dict[str, str]]:
     settings = ensure_stripe_enabled()
     campaign = resolve_public_experiment_campaign(db, settings)
     if campaign.target_amount_minor <= 0:
         raise StripeUnavailableError("The public experiment amount is not configured correctly.")
 
     normalized_source_code = normalize_source_code(source_code)
-    success_url, cancel_url = build_public_checkout_urls(settings, source_code=normalized_source_code)
+    normalized_referral_code = normalize_referral_code(referral_code)
+    success_url, cancel_url = build_public_checkout_urls(
+        settings,
+        source_code=normalized_source_code,
+        referral_code=normalized_referral_code,
+    )
+    metadata = {
+        "campaign_id": campaign.id,
+        "campaign_slug": campaign.slug,
+        "experiment_type": EXPERIMENT_TYPE,
+        "source_code": normalized_source_code,
+    }
+    if normalized_referral_code:
+        metadata["referring_referral_code"] = normalized_referral_code
     client = get_stripe_client()
     try:
         session_obj = client.checkout.Session.create(
@@ -144,12 +191,7 @@ def create_public_checkout_session(db: Session, *, source_code: str | None = Non
             ],
             success_url=success_url,
             cancel_url=cancel_url,
-            metadata={
-                "campaign_id": campaign.id,
-                "campaign_slug": campaign.slug,
-                "experiment_type": EXPERIMENT_TYPE,
-                "source_code": normalized_source_code,
-            },
+            metadata=metadata,
         )
     except Exception as exc:
         raise StripeUnavailableError("Stripe Checkout is currently unavailable.") from exc
@@ -162,10 +204,12 @@ def create_public_checkout_session(db: Session, *, source_code: str | None = Non
         amount_total_minor=campaign.target_amount_minor,
         payment_status=getattr(session_obj, "payment_status", None) or _get_object_value(session_obj, "payment_status"),
         source_code=normalized_source_code,
+        referring_referral_code=normalized_referral_code,
         metadata_json={
             "campaign_slug": campaign.slug,
             "experiment_type": EXPERIMENT_TYPE,
             "source_code": normalized_source_code,
+            "referring_referral_code": normalized_referral_code,
         },
     )
     db.add(record)
@@ -242,6 +286,11 @@ def serialize_public_checkout_status(db: Session, checkout_session_id: str) -> P
     record = refresh_checkout_status_from_stripe(db, get_checkout_session_record(db, checkout_session_id))
     campaign = record.campaign
     campaign_name = campaign.name if campaign else "Experiment"
+    shareable_referral_code = (
+        record.referral_code
+        if record.status == CheckoutSessionRecordStatus.COMPLETED and record.payment_status == "paid"
+        else None
+    )
     return PublicCheckoutStatusResponse(
         status=record.status.value if hasattr(record.status, "value") else str(record.status),
         payment_status=record.payment_status,
@@ -249,6 +298,7 @@ def serialize_public_checkout_status(db: Session, checkout_session_id: str) -> P
         currency=record.currency,
         campaign_name=campaign_name,
         completed_at=record.completed_at,
+        referral_code=shareable_referral_code,
     )
 
 
@@ -311,6 +361,58 @@ def _top_source_rows(db: Session, campaign_id: str) -> Sequence[Any]:
     )
 
 
+def _top_referrer_rows(db: Session, campaign_id: str) -> Sequence[Any]:
+    successful_case = case(
+        (
+            (CheckoutSessionRecord.status == CheckoutSessionRecordStatus.COMPLETED)
+            & (CheckoutSessionRecord.payment_status == "paid"),
+            1,
+        ),
+        else_=0,
+    )
+    amount_case = case(
+        (
+            (CheckoutSessionRecord.status == CheckoutSessionRecordStatus.COMPLETED)
+            & (CheckoutSessionRecord.payment_status == "paid"),
+            CheckoutSessionRecord.amount_total_minor,
+        ),
+        else_=0,
+    )
+    return (
+        db.query(
+            CheckoutSessionRecord.referring_referral_code.label("referral_code"),
+            func.count(CheckoutSessionRecord.id).label("checkout_sessions_started"),
+            func.sum(successful_case).label("completed_payments"),
+            func.coalesce(func.sum(amount_case), 0).label("amount_collected_minor"),
+        )
+        .filter(
+            CheckoutSessionRecord.campaign_id == campaign_id,
+            CheckoutSessionRecord.referring_referral_code.isnot(None),
+        )
+        .group_by(CheckoutSessionRecord.referring_referral_code)
+        .all()
+    )
+
+
+def _merged_referral_totals(rows: Sequence[Any]) -> dict[str, dict[str, int]]:
+    merged_totals: dict[str, dict[str, int]] = defaultdict(
+        lambda: {
+            "checkout_sessions_started": 0,
+            "completed_payments": 0,
+            "amount_collected_minor": 0,
+        }
+    )
+    for row in rows:
+        normalized_referral_code = normalize_referral_code(row.referral_code)
+        if normalized_referral_code is None:
+            continue
+        bucket = merged_totals[normalized_referral_code]
+        bucket["checkout_sessions_started"] += int(row.checkout_sessions_started or 0)
+        bucket["completed_payments"] += int(row.completed_payments or 0)
+        bucket["amount_collected_minor"] += int(row.amount_collected_minor or 0)
+    return merged_totals
+
+
 def get_private_experiment_analytics(db: Session, settings: Settings | None = None) -> AdminExperimentAnalyticsResponse:
     campaign = resolve_public_experiment_campaign(db, settings)
     checkout_sessions_started = int(
@@ -337,6 +439,13 @@ def get_private_experiment_analytics(db: Session, settings: Settings | None = No
         .scalar()
         or 0
     )
+    merged_referral_totals = _merged_referral_totals(_top_referrer_rows(db, campaign.id))
+    referred_checkout_sessions = sum(
+        totals["checkout_sessions_started"] for totals in merged_referral_totals.values()
+    )
+    referred_completed_payments = sum(
+        totals["completed_payments"] for totals in merged_referral_totals.values()
+    )
     merged_source_totals: dict[str, dict[str, int]] = defaultdict(
         lambda: {
             "checkout_sessions_started": 0,
@@ -359,6 +468,22 @@ def get_private_experiment_analytics(db: Session, settings: Settings | None = No
         )
         for source_code, totals in sorted(
             merged_source_totals.items(),
+            key=lambda item: (
+                -item[1]["completed_payments"],
+                -item[1]["checkout_sessions_started"],
+                item[0],
+            ),
+        )[:10]
+    ]
+    top_referrers = [
+        AdminExperimentReferralAnalyticsResponse(
+            referral_code=referral_code,
+            checkout_sessions_started=totals["checkout_sessions_started"],
+            completed_payments=totals["completed_payments"],
+            amount_collected_minor=totals["amount_collected_minor"],
+        )
+        for referral_code, totals in sorted(
+            merged_referral_totals.items(),
             key=lambda item: (
                 -item[1]["completed_payments"],
                 -item[1]["checkout_sessions_started"],
@@ -391,7 +516,15 @@ def get_private_experiment_analytics(db: Session, settings: Settings | None = No
         amount_collected_minor=int(amount_collected_minor or 0),
         currency=campaign.currency.upper(),
         conversion_rate=(completed_count / started_count) if started_count else 0,
+        referred_checkout_sessions=referred_checkout_sessions,
+        referred_completed_payments=referred_completed_payments,
+        referral_conversion_rate=(
+            referred_completed_payments / referred_checkout_sessions
+            if referred_checkout_sessions
+            else 0
+        ),
         top_sources=top_sources,
+        top_referrers=top_referrers,
         recent_payments=recent_payments,
     )
 
@@ -432,6 +565,60 @@ def _ensure_checkout_session_matches_campaign(record: CheckoutSessionRecord, cam
         raise CheckoutSessionVerificationError("Stripe Checkout Session experiment metadata mismatch.")
 
 
+def _assign_referral_code_candidate(db: Session, record: CheckoutSessionRecord) -> None:
+    if record.referral_code:
+        return
+    for _ in range(10):
+        candidate = generate_referral_code()
+        existing = (
+            db.query(CheckoutSessionRecord.id)
+            .filter(CheckoutSessionRecord.referral_code == candidate)
+            .first()
+        )
+        if existing is None:
+            record.referral_code = candidate
+            return
+    raise CheckoutSessionVerificationError("Unable to allocate a unique referral code.")
+
+
+def _needs_referral_code_backfill(record: CheckoutSessionRecord) -> bool:
+    return (
+        record.status == CheckoutSessionRecordStatus.COMPLETED
+        and record.payment_status == "paid"
+        and not record.referral_code
+    )
+
+
+def _apply_completed_session_state(db: Session, record: CheckoutSessionRecord, event_id: str, session_obj: Any) -> None:
+    metadata = _get_metadata(session_obj)
+    metadata_referring_code = normalize_referral_code(str(metadata.get("referring_referral_code") or "") or None)
+    record.status = CheckoutSessionRecordStatus.COMPLETED
+    record.payment_status = str(_get_object_value(session_obj, "payment_status", "") or "") or None
+    record.stripe_payment_intent_id = str(_get_object_value(session_obj, "payment_intent", "") or "") or None
+    record.stripe_customer_id = str(_get_object_value(session_obj, "customer", "") or "") or None
+    customer_details = _get_object_value(session_obj, "customer_details", {}) or {}
+    record.customer_email = str(_get_object_value(customer_details, "email", "") or "") or None
+    record.stripe_event_id = event_id
+    record.completed_at = record.completed_at or now_utc()
+    record.currency = str(_get_object_value(session_obj, "currency", record.currency) or record.currency).upper()
+    record.amount_total_minor = int(_get_object_value(session_obj, "amount_total", record.amount_total_minor) or record.amount_total_minor)
+    record.source_code = normalize_source_code(str(metadata.get("source_code") or record.source_code or DEFAULT_SOURCE_CODE))
+    record.referring_referral_code = metadata_referring_code or record.referring_referral_code
+    _assign_referral_code_candidate(db, record)
+    record.metadata_json = {
+        **(record.metadata_json or {}),
+        "campaign_slug": record.campaign.slug if record.campaign else None,
+        "experiment_type": EXPERIMENT_TYPE,
+        "source_code": record.source_code,
+        "referring_referral_code": record.referring_referral_code,
+        "referral_code": record.referral_code,
+    }
+
+
+def _is_referral_code_collision(exc: IntegrityError) -> bool:
+    return "referral_code" in str(exc).lower()
+
+
 def process_checkout_session_completed(db: Session, event: Any) -> SafeWebhookProcessingResult:
     session_obj = _get_object_value(_get_object_value(event, "data", {}), "object", {})
     session_id = str(_get_object_value(session_obj, "id", "") or "")
@@ -440,33 +627,32 @@ def process_checkout_session_completed(db: Session, event: Any) -> SafeWebhookPr
         raise CheckoutSessionVerificationError("Stripe webhook event is missing a checkout session id.")
 
     record = get_checkout_session_record(db, session_id)
-    if record.stripe_event_id == event_id:
+    if record.stripe_event_id == event_id and not _needs_referral_code_backfill(record):
         return SafeWebhookProcessingResult(accepted=True, already_processed=True, status="completed")
-    if record.status == CheckoutSessionRecordStatus.COMPLETED:
+    if record.status == CheckoutSessionRecordStatus.COMPLETED and not _needs_referral_code_backfill(record):
         return SafeWebhookProcessingResult(accepted=True, already_processed=True, status="completed")
 
     _ensure_checkout_session_matches_campaign(record, record.campaign, session_obj)
-    record.status = CheckoutSessionRecordStatus.COMPLETED
-    record.payment_status = str(_get_object_value(session_obj, "payment_status", "") or "") or None
-    record.stripe_payment_intent_id = str(_get_object_value(session_obj, "payment_intent", "") or "") or None
-    record.stripe_customer_id = str(_get_object_value(session_obj, "customer", "") or "") or None
-    customer_details = _get_object_value(session_obj, "customer_details", {}) or {}
-    record.customer_email = str(_get_object_value(customer_details, "email", "") or "") or None
-    record.stripe_event_id = event_id
-    record.completed_at = now_utc()
-    record.currency = str(_get_object_value(session_obj, "currency", record.currency) or record.currency).upper()
-    record.amount_total_minor = int(_get_object_value(session_obj, "amount_total", record.amount_total_minor) or record.amount_total_minor)
-    record.metadata_json = {
-        **(record.metadata_json or {}),
-        "campaign_slug": record.campaign.slug if record.campaign else None,
-        "experiment_type": EXPERIMENT_TYPE,
-    }
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        logger.info("Stripe webhook already persisted for event %s type %s", event_id, _get_object_value(event, "type"))
-        return SafeWebhookProcessingResult(accepted=True, already_processed=True, status="completed")
+    for _ in range(10):
+        _apply_completed_session_state(db, record, event_id, session_obj)
+        try:
+            db.commit()
+            break
+        except IntegrityError as exc:
+            db.rollback()
+            if _is_referral_code_collision(exc):
+                record = get_checkout_session_record(db, session_id)
+                if (
+                    (record.stripe_event_id == event_id or record.status == CheckoutSessionRecordStatus.COMPLETED)
+                    and not _needs_referral_code_backfill(record)
+                ):
+                    return SafeWebhookProcessingResult(accepted=True, already_processed=True, status="completed")
+                record.referral_code = None
+                continue
+            logger.info("Stripe webhook already persisted for event %s type %s", event_id, _get_object_value(event, "type"))
+            return SafeWebhookProcessingResult(accepted=True, already_processed=True, status="completed")
+    else:
+        raise CheckoutSessionVerificationError("Unable to persist a unique referral code for this checkout.")
     db.refresh(record)
     logger.info("Processed Stripe webhook event %s type %s", event_id, _get_object_value(event, "type"))
     return SafeWebhookProcessingResult(accepted=True, status="completed")

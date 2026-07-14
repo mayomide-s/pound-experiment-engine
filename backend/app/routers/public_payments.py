@@ -29,7 +29,11 @@ def create_public_checkout_session_endpoint(
     db: Session = Depends(get_db),
 ):
     try:
-        _record, response = create_public_checkout_session(db, source_code=payload.source_code)
+        _record, response = create_public_checkout_session(
+            db,
+            source_code=payload.source_code,
+            referral_code=payload.referral_code,
+        )
         return PublicCheckoutSessionResponse(**response)
     except StripeUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
