@@ -907,7 +907,17 @@ def test_public_experiment_stats_and_admin_analytics_include_completed_paid_chec
     assert admin_payload["top_sources"][0]["checkout_sessions_started"] == 2
     assert admin_payload["top_sources"][0]["completed_payments"] == 2
     assert admin_payload["top_sources"][0]["amount_collected_minor"] == 200
+    assert admin_payload["source_performance"][0]["source_code"] == "reddit"
+    assert admin_payload["source_performance"][0]["checkout_sessions_started"] == 2
+    assert admin_payload["source_performance"][0]["completed_payments"] == 2
+    assert admin_payload["source_performance"][0]["amount_collected_minor"] == 200
     assert any(item["source_code"] == "newsletter" and item["completed_payments"] == 0 for item in admin_payload["top_sources"])
+    assert any(
+        item["source_code"] == "newsletter"
+        and item["checkout_sessions_started"] == 1
+        and item["completed_payments"] == 0
+        for item in admin_payload["source_performance"]
+    )
     assert admin_payload["top_referrers"][0]["referral_code"] == "r_seedalpha"
     assert admin_payload["top_referrers"][0]["checkout_sessions_started"] == 2
     assert admin_payload["top_referrers"][0]["completed_payments"] == 2
@@ -1018,10 +1028,15 @@ def test_admin_analytics_merges_legacy_invalid_sources_under_direct(client, monk
     assert response.status_code == 200
     payload = response.json()
     direct_rows = [row for row in payload["top_sources"] if row["source_code"] == "direct"]
+    source_performance_direct_rows = [row for row in payload["source_performance"] if row["source_code"] == "direct"]
     assert len(direct_rows) == 1
     assert direct_rows[0]["checkout_sessions_started"] == 3
     assert direct_rows[0]["completed_payments"] == 3
     assert direct_rows[0]["amount_collected_minor"] == 300
+    assert len(source_performance_direct_rows) == 1
+    assert source_performance_direct_rows[0]["checkout_sessions_started"] == 3
+    assert source_performance_direct_rows[0]["completed_payments"] == 3
+    assert source_performance_direct_rows[0]["amount_collected_minor"] == 300
 
 
 def test_admin_analytics_normalizes_legacy_referral_codes_and_excludes_invalid_values(client, monkeypatch):

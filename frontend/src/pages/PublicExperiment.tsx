@@ -7,23 +7,14 @@ import { PublicPolicyNav } from "../components/PublicPolicyNav";
 import { api, type PublicExperimentStatsResponse } from "../api/client";
 import { FAQ_ITEMS, HOW_IT_WORKS_STEPS, MONEY_USE_STATEMENT, TRUST_POINTS } from "../public/content";
 import { normalizePublicReferralCode } from "../public/share";
+import { normalizePublicSourceCode } from "../public/source";
 
 const EXPERIMENT_URL = "/experiment";
-const DEFAULT_SOURCE_CODE = "direct";
-const SOURCE_CODE_PATTERN = /^[a-z0-9_-]{1,64}$/;
 const STATS_REFRESH_INTERVAL_MS = 30000;
 const STATS_REFRESH_STORAGE_KEY = "public-experiment-stats-refresh";
+const DEFAULT_SOURCE_CODE = "direct";
 
-export function normalizePublicSourceCode(rawSourceCode: string | null) {
-  if (rawSourceCode === null) {
-    return DEFAULT_SOURCE_CODE;
-  }
-  const normalized = rawSourceCode.trim().toLowerCase();
-  if (!normalized || !SOURCE_CODE_PATTERN.test(normalized)) {
-    return DEFAULT_SOURCE_CODE;
-  }
-  return normalized;
-}
+export { normalizePublicSourceCode } from "../public/source";
 
 function ensureMetaTag(name: "description" | "og:title" | "og:description", content: string, property = false) {
   const selector = property ? `meta[property="${name}"]` : `meta[name="${name}"]`;

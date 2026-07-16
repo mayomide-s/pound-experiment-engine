@@ -10,6 +10,7 @@ import {
   type PipelineRunSummary,
 } from "../api/client";
 import { EventTimeline } from "../components/EventTimeline";
+import { LaunchToolkitPanel } from "../components/LaunchToolkitPanel";
 import { RunList, RunProviderFilter, RunStatusFilter } from "../components/RunList";
 import { AUDIENCE_LEVELS, CONTENT_FORMATS, STYLE_PRESETS, TARGET_PLATFORMS } from "../constants";
 import { getArchivedRunsStorageKey, loadArchivedRunIds, saveArchivedRunIds } from "../utils/archivedRuns";
@@ -760,34 +761,8 @@ export function DashboardPage() {
                   <div><span>Referred Payments</span><strong>{experimentAnalytics.referred_completed_payments}</strong></div>
                   <div><span>Referral Conversion</span><strong>{(experimentAnalytics.referral_conversion_rate * 100).toFixed(1)}%</strong></div>
                 </div>
+                <LaunchToolkitPanel analytics={experimentAnalytics} />
                 <div className="public-section-grid">
-                  <article className="public-card">
-                    <h2>Top Sources</h2>
-                    {experimentAnalytics.top_sources.length > 0 ? (
-                      <table className="data-table">
-                        <thead>
-                          <tr>
-                            <th>Source</th>
-                            <th>Started</th>
-                            <th>Completed</th>
-                            <th>Amount</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {experimentAnalytics.top_sources.map((source) => (
-                            <tr key={source.source_code}>
-                              <td>{source.source_code}</td>
-                              <td>{source.checkout_sessions_started}</td>
-                              <td>{source.completed_payments}</td>
-                              <td>{formatMoney(source.amount_collected_minor, experimentAnalytics.currency)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    ) : (
-                      <p className="subtle">No source analytics yet.</p>
-                    )}
-                  </article>
                   <article className="public-card">
                     <h2>Top Referrers</h2>
                     {experimentAnalytics.top_referrers.length > 0 ? (

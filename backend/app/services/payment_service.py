@@ -459,7 +459,7 @@ def get_private_experiment_analytics(db: Session, settings: Settings | None = No
         bucket["checkout_sessions_started"] += int(row.checkout_sessions_started or 0)
         bucket["completed_payments"] += int(row.completed_payments or 0)
         bucket["amount_collected_minor"] += int(row.amount_collected_minor or 0)
-    top_sources = [
+    ordered_sources = [
         AdminExperimentSourceAnalyticsResponse(
             source_code=source_code,
             checkout_sessions_started=totals["checkout_sessions_started"],
@@ -473,8 +473,9 @@ def get_private_experiment_analytics(db: Session, settings: Settings | None = No
                 -item[1]["checkout_sessions_started"],
                 item[0],
             ),
-        )[:10]
+        )
     ]
+    top_sources = ordered_sources[:10]
     top_referrers = [
         AdminExperimentReferralAnalyticsResponse(
             referral_code=referral_code,
@@ -524,6 +525,7 @@ def get_private_experiment_analytics(db: Session, settings: Settings | None = No
             else 0
         ),
         top_sources=top_sources,
+        source_performance=ordered_sources,
         top_referrers=top_referrers,
         recent_payments=recent_payments,
     )

@@ -132,6 +132,7 @@ export type AdminExperimentAnalyticsResponse = {
   referred_completed_payments: number;
   referral_conversion_rate: number;
   top_sources: AdminExperimentSourceAnalyticsResponse[];
+  source_performance: AdminExperimentSourceAnalyticsResponse[];
   top_referrers: AdminExperimentReferralAnalyticsResponse[];
   recent_payments: AdminExperimentRecentPaymentResponse[];
 };

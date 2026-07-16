@@ -86,5 +86,6 @@ class AdminExperimentAnalyticsResponse(BaseModel):
     referred_completed_payments: int
     referral_conversion_rate: float
     top_sources: list[AdminExperimentSourceAnalyticsResponse]
+    source_performance: list[AdminExperimentSourceAnalyticsResponse]
     top_referrers: list[AdminExperimentReferralAnalyticsResponse]
     recent_payments: list[AdminExperimentRecentPaymentResponse]

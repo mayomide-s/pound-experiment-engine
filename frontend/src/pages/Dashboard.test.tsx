@@ -1,5 +1,5 @@
 import { StrictMode } from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -119,6 +119,26 @@ beforeEach(() => {
     referred_completed_payments: 1,
     referral_conversion_rate: 0.5,
     top_sources: [],
+    source_performance: [
+      {
+        source_code: "reddit_askuk_1",
+        checkout_sessions_started: 6,
+        completed_payments: 3,
+        amount_collected_minor: 300,
+      },
+      {
+        source_code: "tiktok_launch_1",
+        checkout_sessions_started: 5,
+        completed_payments: 1,
+        amount_collected_minor: 100,
+      },
+      {
+        source_code: "direct",
+        checkout_sessions_started: 2,
+        completed_payments: 0,
+        amount_collected_minor: 0,
+      },
+    ],
     top_referrers: [
       {
         referral_code: "r_ab12cd34",
@@ -361,6 +381,130 @@ describe("DashboardPage handoff precedence", () => {
     expect(screen.getByText("Referral Conversion")).toBeInTheDocument();
     expect(screen.getByText("Top Referrers")).toBeInTheDocument();
     expect(screen.getByText("r_ab12cd34")).toBeInTheDocument();
-    expect(screen.getByText("50.0%")).toBeInTheDocument();
+    expect(screen.getAllByText("50.0%").length).toBeGreaterThan(0);
+  });
+
+  it("renders launch toolkit metrics and filters source performance", async () => {
+    vi.spyOn(api, "getAccountDefaults").mockResolvedValue(makeAccountDefaults());
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText("Launch Toolkit")).toBeInTheDocument();
+    });
+
+    const sourcePerformanceSection = screen.getByText("Source Performance").closest("article");
+    expect(sourcePerformanceSection).not.toBeNull();
+    const sourcePerformanceQueries = within(sourcePerformanceSection as HTMLElement);
+
+    expect(screen.getAllByText("reddit_askuk_1").length).toBeGreaterThan(0);
+    expect(screen.getByText("Best performing")).toBeInTheDocument();
+    expect(screen.getByText("reddit_askuk_1 (50.0%)")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Search sources"), {
+      target: { value: "tiktok" },
+    });
+
+    expect(sourcePerformanceQueries.getByText("tiktok_launch_1")).toBeInTheDocument();
+    expect(sourcePerformanceQueries.queryByText("reddit_askuk_1")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Filter"), {
+      target: { value: "zero-completed" },
+    });
+    fireEvent.change(screen.getByLabelText("Search sources"), {
+      target: { value: "" },
+    });
+
+    expect(sourcePerformanceQueries.getByText("direct")).toBeInTheDocument();
+    expect(sourcePerformanceQueries.queryByText("tiktok_launch_1")).not.toBeInTheDocument();
+  });
+
+  it("shows copy success and clipboard failure states in the launch toolkit", async () => {
+    vi.spyOn(api, "getAccountDefaults").mockResolvedValue(makeAccountDefaults());
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText("Launch Toolkit")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "TikTok" }));
+    fireEvent.change(screen.getByLabelText("Campaign label"), {
+      target: { value: "launch_1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining("/experiment?source=tiktok_launch_1"));
+    });
+    expect(screen.getByText("Link copied")).toBeInTheDocument();
+
+    writeText.mockRejectedValueOnce(new Error("denied"));
+    fireEvent.click(screen.getByRole("button", { name: /copy link|link copied/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Clipboard access failed. You can still open or share the link directly.")).toBeInTheDocument();
+    });
+  });
+
+  it("lets launch notes be added and removed locally", async () => {
+    vi.spyOn(api, "getAccountDefaults").mockResolvedValue(makeAccountDefaults());
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText("Launch Notes")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add note" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Launch note 1")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText("Channel"), {
+      target: { value: "TikTok main account" },
+    });
+    expect(screen.getByDisplayValue("TikTok main account")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete note" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("No launch notes yet.")).toBeInTheDocument();
+    });
+  });
+
+  it("exports csv safely and revokes the object url", async () => {
+    vi.spyOn(api, "getAccountDefaults").mockResolvedValue(makeAccountDefaults());
+    const createObjectURL = vi.fn().mockReturnValue("blob:test-launch-toolkit");
+    const revokeObjectURL = vi.fn();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    Object.defineProperty(window.URL, "createObjectURL", {
+      configurable: true,
+      value: createObjectURL,
+    });
+    Object.defineProperty(window.URL, "revokeObjectURL", {
+      configurable: true,
+      value: revokeObjectURL,
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText("Launch Toolkit")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
+
+    await waitFor(() => {
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      expect(clickSpy).toHaveBeenCalledTimes(1);
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:test-launch-toolkit");
+    });
   });
 });
